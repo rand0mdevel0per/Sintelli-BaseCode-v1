@@ -1,0 +1,25 @@
+{
+  "knowledge_base": [
+    {
+      "id": "ml_basics_001",
+      "title": "神经网络基础",
+      "content": "神经网络是由多个神经元组成的计算模型，通过前向传播和反向传播进行训练。",
+      "category": "机器学习",
+      "tags": ["神经网络", "深度学习", "AI"]
+    },
+    {
+      "id": "nlp_001", 
+      "title": "自然语言处理",
+      "content": "NLP是人工智能的重要分支，专注于计算机与人类语言的交互。",
+      "category": "自然语言处理",
+      "tags": ["NLP", "语言模型", "文本处理"]
+    },
+    {
+      "id": "cuda_001",
+      "title": "CUDA编程",
+      "content": "CUDA是NVIDIA开发的并行计算平台和编程模型，用于GPU加速计算。",
+      "category": "并行计算",
+      "tags": ["CUDA", "GPU", "并行编程"]
+    }
+  ]
+}

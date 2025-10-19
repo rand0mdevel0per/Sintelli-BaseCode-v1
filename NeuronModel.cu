@@ -1,0 +1,820 @@
+//
+// Created by ASUS on 10/3/2025.
+//
+// NeuronModel template class for managing 3D grid of neurons
+// This class handles neuron allocation and inter-neuron connectivity
+
+#ifndef SRC_NEURONMODEL_CUH
+#define SRC_NEURONMODEL_CUH
+
+#include "Neuron.cu"
+#include <cuda_runtime.h>
+#include <thread>
+#include <mutex>
+#include "isw.hpp"
+#include "sct.hpp"
+#include "dslzma.h"
+#include "smry.cpp"
+#include "feature_extractor.h"
+#include "semantic_matcher.h"
+#include "semantic_query_interface.h"
+#include "semantic_matcher.cpp"
+#include "structs.h"  // 包含KFE_STM_Slot定义
+#include "deviceQueue.cpp"  // 包含DeviceQueue模板定义
+#include "KFEManager.h"    // KFE存储管理器
+#include "memory_slot.h"
+#include <Windows.h>
+#include "rag_knowledge_loader.cpp"
+
+#define ll long long
+#define ull unsigned ll
+
+char* wideCharToMultiByte(wchar_t* pWCStrKey)
+{
+    //第一次调用确认转换后单字节字符串的长度，用于开辟空间
+    int pSize = WideCharToMultiByte(CP_OEMCP, 0, pWCStrKey, wcslen(pWCStrKey), NULL, 0, NULL, NULL);
+    char* pCStrKey = new char[pSize+1];
+    //第二次调用将双字节字符串转换成单字节字符串
+    WideCharToMultiByte(CP_OEMCP, 0, pWCStrKey, wcslen(pWCStrKey), pCStrKey, pSize, NULL, NULL);
+    pCStrKey[pSize] = '\0';
+    return pCStrKey;
+
+    //如果想要转换成string，直接赋值即可
+    //string pKey = pCStrKey;
+}
+
+wchar_t *multiByteToWideChar(const std::string& pKey)
+{
+    const char *pCStrKey = pKey.c_str();
+    //第一次调用返回转换后的字符串长度，用于确认为wchar_t*开辟多大的内存空间
+    int pSize = MultiByteToWideChar(CP_OEMCP, 0, pCStrKey, strlen(pCStrKey) + 1, NULL, 0);
+    wchar_t *pWCStrKey = new wchar_t[pSize];
+    //第二次调用将单字节字符串转换成双字节字符串
+    MultiByteToWideChar(CP_OEMCP, 0, pCStrKey, strlen(pCStrKey) + 1, pWCStrKey, pSize);
+    return pWCStrKey;
+}
+
+/**
+ * @brief Template class for managing a 3D grid of neurons.
+ *
+ * This class handles:
+ * - Allocation and initialization of neurons.
+ * - Inter-neuron connectivity.
+ * - Integration with semantic matching systems.
+ * - Serialization and deserialization of the model state.
+ *
+ */
+class NeuronModel {
+public:
+    /**
+     * @brief Initializes the neuron grid and associated systems.Default initializes to 32x32x32.
+     *
+     * Allocates memory for neurons and sets up semantic matching components.
+     */
+    NeuronModel() : processor(e5), logic_processor(e5), memory_processor(e5), sct_processor(e5) {
+        NeuronModel(32);
+    }
+    /**
+     * @brief Initializes the neuron grid and associated systems.
+     *
+     * Allocates memory for neurons and sets up semantic matching components.
+     */
+    NeuronModel(ull grid_size) : processor(e5), logic_processor(e5), memory_processor(e5), sct_processor(e5) {
+        cudaMalloc(&d_active_flags, NEURON_COUNT * sizeof(bool));
+        for (int i = 0; i < 4; i++) {
+            cudaStreamCreate(&streams[i]);
+        }
+
+        if (grid_size != 0) {
+            GRID_SIZE = grid_size;
+        }
+
+        // 初始化：全部激活
+        cudaMemset(d_active_flags, 1, NEURON_COUNT * sizeof(bool));
+        static E5LargeModel e5_instance("/models/e5/e5_large.onnx", "/models/vocab.json", "/models/merges.txt",
+                                        "/models/special_tokens.json");
+        e5 = &e5_instance;
+        processor = UnifiedInputProcessor(e5);
+        logic_processor = UnifiedInputProcessor(e5);
+        memory_processor = UnifiedInputProcessor(e5);
+        sct_processor = UnifiedInputProcessor(e5);
+        cudaMallocManaged(&d_neurons, GRID_SIZE * GRID_SIZE * GRID_SIZE * sizeof(Neuron));
+
+        // 初始化语义匹配系统
+        feature_extractor = std::make_unique<FeatureExtractor>(
+            "/models/e5/e5_large.onnx", "/models/vocab.json",
+            "/models/merges.txt", "/models/special_tokens.json");
+        semantic_matcher = std::make_unique<SemanticMatcher>(
+            "/models/e5/e5_large.onnx", "/models/vocab.json",
+            "/models/merges.txt", "/models/special_tokens.json");
+
+        // 创建用于语义匹配的外部存储
+        static ExternalStorage<SemanticMatch> semantic_storage(1024, 100.0, 1.0);
+        integrated_matcher = std::make_unique<IntegratedSemanticMatcher>(&semantic_storage);
+
+        // 初始化Logic语义匹配系统
+        logic_matcher = std::make_unique<LogicSemanticMatcher>(
+            "/models/e5/e5_large.onnx", "/models/vocab.json",
+            "/models/merges.txt", "/models/special_tokens.json");
+
+        static ExternalStorage<LogicDescriptor> logic_storage(512, 50.0, 0.5);
+        logic_injector = std::make_unique<LogicInjector>(&logic_storage,
+                                                         "/models/e5/e5_large.onnx");
+
+        static ExternalStorage<LogicDescriptor> memory_logic_storage(512, 50.0, 0.5);
+        memory_injector = std::make_unique<LogicInjector>(&memory_logic_storage,
+                                                          "/models/e5/e5_large.onnx");
+
+        // 创建KFE存储队列（所有神经元共享）
+        static DeviceQueue<KFE_STM_Slot, 32> kfe_storage_queue;
+        static DeviceQueue<std::string, 32> kfe_query_queue;
+        static DeviceQueue<KFE_STM_Slot, 32> kfe_result_queue;
+
+        // 启动KFE管理器
+        static KFEManager kfe_manager(&kfe_storage_queue, &kfe_query_queue, &kfe_result_queue);
+
+        for (int idx = 0; idx < GRID_SIZE * GRID_SIZE * GRID_SIZE; idx++) {
+            int x = idx / (GRID_SIZE * GRID_SIZE);
+            int y = (idx / GRID_SIZE) % GRID_SIZE;
+            int z = idx % GRID_SIZE;
+
+            ll coord[3] = {x, y, z};
+            // Set up neighbor queue connections
+            DeviceQueue<Message, 32> *neighbour_q[6] = {nullptr};
+            ull seed = x * 1000000 + y * 1000 + z;
+
+            // +X方向
+            if (x < GRID_SIZE - 1) {
+                neighbour_q[0] = &queues[x + 1][y][z]; // 指向邻居的-X队列
+            }else {
+                neighbour_q[0] = &queues[x - 1][y][z]; // 指向邻居的+X队列
+            }
+            // -X方向
+            if (x > 0) {
+                neighbour_q[1] = &queues[x - 1][y][z]; // 指向邻居的+X队列
+            }else {
+                neighbour_q[1] = &queues[x + 1][y][z]; // 指向邻居的-X队列
+            }
+            // +Y方向
+            if (y < GRID_SIZE - 1) {
+                neighbour_q[2] = &queues[x][y + 1][z];
+            }else {
+                neighbour_q[2] = &queues[x][y - 1][z];
+            }
+            // -Y方向
+            if (y > 0) {
+                neighbour_q[3] = &queues[x][y - 1][z];
+            }else {
+                neighbour_q[3] = &queues[x][y + 1][z];
+            }
+            // +Z方向
+            if (z < GRID_SIZE - 1) {
+                neighbour_q[4] = &queues[x][y][z + 1];
+            }else {
+                neighbour_q[4] = &queues[x][y][z - 1];
+            }
+            // -Z方向
+            if (z > 0) {
+                neighbour_q[5] = &queues[x][y][z - 1];
+            }else {
+                neighbour_q[5] = &queues[x][y][z + 1];
+            }
+
+            new(&d_neurons[idx]) Neuron(neighbour_q, coord, seed, &queues[x][y][z],
+                                        &kfe_storage_queue, &kfe_query_queue, &kfe_result_queue);
+            // placement new
+        }
+
+        std::cout << "分布式神经元系统初始化完成喵!" << std::endl;
+    }
+
+    explicit NeuronModel(std::string path) : processor(e5), logic_processor(e5), memory_processor(e5), sct_processor(e5) {
+        // 使用委派构造函数
+        NeuronModel(2);
+        path_default = path;
+        if(!load(path)) {
+            throw std::runtime_error("Failed to load model from path: " + path);
+        }
+    }
+
+    bool run() {
+        try {
+            is_running = true;
+            eventloop = std::thread([this]() {
+                this->loop();
+            });
+            eventloop.detach();
+            std::cout << "神经元网络运行中喵..." << std::endl;
+            std::thread(loop).detach();
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
+    bool save(std::string path = "") {
+        if (path.empty()) path = path_default;
+        try {
+            // 保存前重置指针
+            resetPointersForSerialization();
+
+            bool result = Serializer<NeuronModel>::save(*this, path);
+
+            // 保存后恢复指针连接
+            rebuildPointerConnections();
+
+            return result;
+        } catch (...) {
+            return false;
+        }
+    }
+
+    bool load(std::string path = "") {
+        if (path.empty()) path = path_default;
+        try {
+            // 简化加载逻辑：直接加载到当前对象
+            if (!Serializer<NeuronModel>::load(*this, path)) {
+                return false;
+            }
+
+            // 重新构建指针连接
+            rebuildPointerConnections();
+
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
+    // ===== 语义匹配接口 =====
+
+    // 注册文本到语义匹配系统
+    uint64_t registerTextForMatching(const std::string &text, const std::string &category = "") {
+        if (!integrated_matcher) return 0;
+        return integrated_matcher->registerAndStore(text, category);
+    }
+
+    // 批量注册文本
+    std::vector<uint64_t> batchRegisterTexts(const std::vector<std::string> &texts,
+                                             const std::string &category = "") {
+        if (!semantic_matcher) return {};
+        return semantic_matcher->batchRegisterTexts(texts, category);
+    }
+
+    // 语义搜索
+    std::vector<SemanticMatch> semanticSearch(const std::string &query_text,
+                                              int top_k = 10,
+                                              double similarity_threshold = 0.5,
+                                              const std::string &metric = "cosine") {
+        if (!semantic_matcher) return {};
+        return semantic_matcher->findSimilarTexts(query_text, top_k, similarity_threshold, metric);
+    }
+
+    // 按类别语义搜索
+    std::vector<SemanticMatch> semanticSearchByCategory(const std::string &query_text,
+                                                        const std::string &category,
+                                                        int top_k = 10,
+                                                        double similarity_threshold = 0.5) {
+        if (!semantic_matcher) return {};
+        return semantic_matcher->findSimilarTextsByCategory(query_text, category, top_k, similarity_threshold);
+    }
+
+    // 获取语义匹配统计信息
+    SemanticMatcher::Stats getSemanticMatchingStats() {
+        if (!semantic_matcher) return SemanticMatcher::Stats();
+        return semantic_matcher->getStats();
+    }
+
+    // 获取最热的语义匹配结果
+    std::vector<SemanticMatch> getHottestSemanticMatches(int k = 10) {
+        if (!integrated_matcher) return {};
+        return integrated_matcher->getHottestMatches(k);
+    }
+
+    // 提取文本特征向量
+    FeatureVector<float> extractTextFeature(const std::string &text) {
+        if (!feature_extractor) return FeatureVector<float>();
+        return feature_extractor->extractTextFeature(text);
+    }
+
+    // 计算文本相似度
+    double calculateTextSimilarity(const std::string &text1, const std::string &text2,
+                                   const std::string &metric = "cosine") {
+        if (!feature_extractor) return -1.0;
+        auto feature1 = feature_extractor->extractTextFeature(text1);
+        auto feature2 = feature_extractor->extractTextFeature(text2);
+        return feature_extractor->calculateSimilarity(feature1, feature2, metric);
+    }
+
+    // ===== Logic语义匹配接口 =====
+
+    // 注册Logic到匹配系统
+    bool registerLogic(const std::string &logic_id,
+                       const std::string &description,
+                       const std::string &category = "",
+                       double activation_threshold = 0.5,
+                       std::function<void(const std::string &, NeuronInput &)> generate_input_callback = nullptr) {
+        if (!logic_matcher) return false;
+
+        LogicDescriptor logic_desc(logic_id, description, category, activation_threshold);
+        logic_desc.generate_input_callback = generate_input_callback;
+
+        return logic_injector->registerLogicWithStorage(logic_desc);
+    }
+
+    // 根据文本查询匹配的Logic
+    std::vector<std::pair<LogicDescriptor, double> > findMatchingLogics(
+        const std::string &query_text,
+        int top_k = 5,
+        double similarity_threshold = 0.3,
+        const std::string &category = "") {
+        if (!logic_matcher) return {};
+        return logic_matcher->findMatchingLogics(query_text, top_k, similarity_threshold, category);
+    }
+
+    // 注入匹配的Logic（执行回调并返回NeuronInput列表）
+    std::vector<std::pair<std::string, NeuronInput> > injectMatchingLogics(
+        const std::string &query_text,
+        int top_k = 3,
+        double similarity_threshold = 0.4) {
+        if (!logic_injector) return {};
+        return logic_injector->injectMatchingLogics(query_text, top_k, similarity_threshold);
+    }
+
+    // 处理用户输入并自动注入匹配的Logic到指定神经元
+    bool processInputWithLogicInjection(const std::string &input_text,
+                                        int neuron_index = 0,
+                                        int port = 0,
+                                        int max_logics = 3,
+                                        double similarity_threshold = 0.4) {
+        if (!logic_injector || input_text.empty()) return false;
+
+        auto activated_logics = logic_injector->injectMatchingLogics(
+            input_text, max_logics, similarity_threshold);
+
+        // 将匹配的Logic注入到神经元
+        for (const auto &[logic_id, neuron_input]: activated_logics) {
+            if (neuron_index >= 0 && neuron_index < GRID_SIZE * GRID_SIZE * GRID_SIZE) {
+                d_neurons[neuron_index].inject(neuron_input, port);
+                std::cout << "注入Logic: " << logic_id << " 到神经元 " << neuron_index
+                        << " 端口 " << port << std::endl;
+            }
+        }
+
+        return !activated_logics.empty();
+    }
+
+    // 获取Logic统计信息
+    LogicSemanticMatcher::LogicStats getLogicStats() {
+        if (!logic_matcher) return {};
+        return logic_matcher->getLogicStats();
+    }
+
+    // 设置Logic回调函数
+    bool setLogicCallback(const std::string &logic_id,
+                          std::function<void(const std::string &, NeuronInput &)> callback) {
+        if (!logic_matcher) return false;
+        return logic_matcher->setLogicCallback(logic_id, callback);
+    }
+
+    // 设置简单Logic回调函数（不需要参数的版本）
+    bool setSimpleLogicCallback(const std::string &logic_id, std::function<void()> callback) {
+        if (!logic_matcher) return false;
+        return logic_matcher->setSimpleLogicCallback(logic_id, callback);
+    }
+
+    // 移除Logic
+    bool removeLogic(const std::string &logic_id) {
+        if (!logic_matcher) return false;
+        return logic_matcher->removeLogic(logic_id);
+    }
+
+    bool input(InputMessage msg) {
+        try {
+            if (msg.has_img) {
+                ImageData img = base64_to_image(msg.base64_image);
+                double img_data[256][256];
+                memcpy(img_data, ImageProcessor::encode(&img)->data, sizeof(img_data));
+                NeuronInput img_inp{};
+                memcpy(img_inp.array, img_data, sizeof(img_data));
+                img_inp.activity = 1.0;
+                img_inp.from_coord[0] = 0;
+                img_inp.from_coord[1] = 0;
+                img_inp.from_coord[2] = 0;
+                img_inp.weight = 1.0;
+                d_neurons[0].inject(img_inp, 1);
+            }
+            if (msg.has_text) {
+                processTextString(&processor, msg.text);
+                std::vector<float> txt_d = feature_extractor->extractTextFeature(msg.text).data;
+                float* text_data = new float[txt_d.size()];
+                memcpy(text_data, txt_d.data(), txt_d.size() * sizeof(float));
+                double* text_data_d = new double[txt_d.size()];
+                for (size_t i = 0; i < txt_d.size(); i++) {
+                    text_data_d[i] = static_cast<double>(txt_d[i]);
+                }
+                double query_emb[128];
+                std::vector<float> emb_flt = feature_extractor->extractTextFeature(msg.text).data;
+                for (size_t i = 0; i < 128; i++) {
+                    query_emb[i] = static_cast<double>(emb_flt[i]);
+                }
+                auto indices = sct.recallTopK(query_emb, 10);  // 召回top-10相关文本
+                auto contents = sct.getRecalledTexts(indices);
+                for (auto ct : contents) {
+                    processTextString(&sct_processor, ct);
+                }
+                sct.addTurn(msg.text, text_data_d);
+                auto matched_logics = logic_injector->findMatchingLogicIds(msg.text);
+                for (const auto& logic_id : matched_logics) {
+                    Logic curr_logic;
+                    logic_tree.fetchByHash(logic_id.first, curr_logic);
+                    char* curr_logic_str = wideCharToMultiByte(curr_logic.content);
+                    processTextString(&logic_processor, std::string(curr_logic_str));
+                    delete[] curr_logic_str;
+                }
+                auto matched_memories = memory_injector->findMatchingLogicIds(msg.text);
+                for (const auto& memory_id : matched_memories) {
+                    MemorySlot curr_memory;
+                    memory_tree.fetchByHash(memory_id.first, curr_memory);
+                    const char* curr_memory_str = reinterpret_cast<const char *>(curr_memory.content.c_str);
+                    processTextString(&memory_processor, std::string(curr_memory_str));
+                    delete[] curr_memory_str;
+                }
+            }
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
+    InputMessage getoutput() {
+        std::lock_guard<std::mutex> lock(msg_mutex);
+        if (!output_msgs.empty()) {
+            InputMessage msg = output_msgs.back();
+            output_msgs.pop_back();
+            return msg;
+        }
+        return InputMessage{false, false, "", ""};
+    }
+
+    bool stop() {
+        try {
+            is_running = false;
+            // 等待所有流完成
+            for (int i = 0; i < 4; i++) {
+                cudaStreamSynchronize(streams[i]);
+            }
+            eventloop.join();
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
+    ~NeuronModel() {
+        std::cout << "正在关闭神经元网络喵..." << std::endl;
+        this->stop();
+        // 等待所有流完成
+        for (int i = 0; i < 4; i++) {
+            cudaStreamSynchronize(streams[i]);
+        }
+        if (d_neurons) {
+            // 调用每个神经元的析构函数
+            ull total_neurons = GRID_SIZE * GRID_SIZE * GRID_SIZE;
+            for (ull i = 0; i < total_neurons; i++) {
+                d_neurons[i].~Neuron();
+            }
+            cudaFree(d_neurons);
+            d_neurons = nullptr;
+        }
+    }
+
+    ull get_size() const {return GRID_SIZE;}
+
+private:
+    ull GRID_SIZE = 32;
+    cudaStream_t streams[4];
+    bool *d_active_flags;
+    std::thread eventloop;
+    ull NEURON_COUNT = GRID_SIZE * GRID_SIZE * GRID_SIZE;
+    ull THREADS_PER_BLOCK = 256;
+    ull NUM_BLOCKS = (NEURON_COUNT + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
+    DeviceQueue<Message, 32> queues[GRID_SIZE][GRID_SIZE][GRID_SIZE]{};
+    Neuron *d_neurons{};
+    ExternalStorage<KFE_STM_Slot> ext_kfe{};
+    SemanticConversationTree sct{};
+    ExternalStorage<Logic> logic_tree{};
+    ExternalStorage<MemorySlot> memory_tree{};
+    std::string path_default = "./models/Si/model.nm1";
+    UnifiedInputProcessor processor;
+    E5LargeModel *e5;
+    std::vector<InputMessage> output_msgs;
+    bool is_running = false;
+    std::mutex msg_mutex;
+    std::vector<std::string> current_logic;
+
+    // 语义匹配相关成员
+    std::unique_ptr<FeatureExtractor> feature_extractor;
+    std::unique_ptr<SemanticMatcher> semantic_matcher;
+    std::unique_ptr<IntegratedSemanticMatcher> integrated_matcher;
+    std::unique_ptr<LogicSemanticMatcher> logic_matcher;
+    std::unique_ptr<LogicInjector> logic_injector;
+    std::unique_ptr<LogicInjector> memory_injector;
+
+    UnifiedInputProcessor logic_processor;
+    UnifiedInputProcessor memory_processor;
+    UnifiedInputProcessor sct_processor;
+
+    RAGKnowledgeBaseLoader rag_loader;
+
+    __host__ void loop() {
+        double next_block[256][256]{};
+        Matrix256 previous_matrix_0{};
+        Matrix256 current_matrix_0{};
+        Matrix256 previous_matrix{};
+        Matrix256 current_matrix{};
+        Matrix256 curr_logic_mat{};
+        Matrix256 prev_logic_mat{};
+        InputMessage cache_msg{};
+        Matrix256 matrix_cache_img[16];
+        int curr_img_mat = 0;
+        while (!is_running) {}
+        while (is_running) {
+            const Matrix256 *next_matrix = processor.getNextBlock();
+            if (next_matrix != nullptr) {
+                NeuronInput next_inp{};
+                memcpy(next_block, next_matrix->data, sizeof(next_block));
+                memcpy(next_inp.array, next_block, sizeof(next_block));
+                next_inp.activity = 1.0;
+                next_inp.from_coord[0] = 0;
+                next_inp.from_coord[1] = 0;
+                next_inp.from_coord[2] = 0;
+                next_inp.weight = 1.0;
+                d_neurons[0].inject(next_inp, 0);
+                delete next_matrix;
+                next_matrix = nullptr;
+            }
+            Matrix256 *next_inject_mt = nullptr;
+            for (int i = 0; i < 4 ;i++) {
+                if (logic_processor.hasMoreBlocks()) {
+                    next_inject_mt = logic_processor.getNextBlock();
+                    if (next_inject_mt != nullptr) {
+                        NeuronInput logic_inp{};
+                        memcpy(next_block, next_inject_mt->data, sizeof(next_block));
+                        memcpy(logic_inp.array, next_block, sizeof(next_block));
+                        logic_inp.activity = 1.0;
+                        logic_inp.from_coord[0] = 0;
+                        logic_inp.from_coord[1] = 0;
+                        logic_inp.from_coord[2] = 0;
+                        logic_inp.weight = 1.0;
+                        d_neurons[4].inject(logic_inp, i);
+                    }
+                }
+            }
+            for (int i = 0; i < 4 ; i++) {
+                if (sct_processor.hasMoreBlocks()) {
+                    next_inject_mt = sct_processor.getNextBlock();
+                    if (next_inject_mt != nullptr) {
+                        NeuronInput sct_inp{};
+                        memcpy(next_block, next_inject_mt->data, sizeof(next_block));
+                        memcpy(sct_inp.array, next_block, sizeof(next_block));
+                        sct_inp.activity = 1.0;
+                        sct_inp.from_coord[0] = 0;
+                        sct_inp.from_coord[1] = 0;
+                        sct_inp.from_coord[2] = 0;
+                        sct_inp.weight = 1.0;
+                        d_neurons[5].inject(sct_inp, i);
+                    }
+                }
+            }
+            for (int i = 0 ; i < 4 ; i++) {
+                if (memory_processor.hasMoreBlocks()) {
+                    next_inject_mt = memory_processor.getNextBlock();
+                    if (next_inject_mt != nullptr) {
+                        NeuronInput memory_inp{};
+                        memcpy(next_block, next_inject_mt->data, sizeof(next_block));
+                        memcpy(memory_inp.array, next_block, sizeof(next_block));
+                        memory_inp.activity = 1.0;
+                        memory_inp.from_coord[0] = 0;
+                        memory_inp.from_coord[1] = 0;
+                        memory_inp.from_coord[2] = 0;
+                        memory_inp.weight = 1.0;
+                        d_neurons[6].inject(memory_inp, i);
+                    }
+                }
+            }
+            if (next_inject_mt != nullptr) {
+                delete next_inject_mt;
+                next_inject_mt = nullptr;
+            }
+            // 将32768个神经元分成4组，每组用一个流
+            int neurons_per_stream = NEURON_COUNT / 4;
+
+            for (int i = 0; i < 4; i++) {
+                int offset = i * neurons_per_stream;
+                int count = (i == 3) ? (NEURON_COUNT - offset) : neurons_per_stream;
+
+                // 异步启动（不等待）
+                all_neurons_kernel<<<NUM_BLOCKS, THREADS_PER_BLOCK, 0, streams[i]>>>(
+                    d_neurons + offset,
+                    d_active_flags + offset,
+                    count
+                );
+            }
+            memcpy(previous_matrix.data, current_matrix.data, sizeof(previous_matrix.data));
+            memcpy(current_matrix.data, d_neurons[1].detach(0).array, sizeof(current_matrix.data));
+            memcpy(previous_matrix_0.data, current_matrix_0.data, sizeof(previous_matrix_0.data));
+            memcpy(current_matrix_0.data, d_neurons[1].detach(1).array, sizeof(current_matrix_0.data));
+            cache_msg = InputMessage{false, false, "", ""};
+            if (ImageProcessor::isValidFrame(&current_matrix, &previous_matrix)) {
+                std::string text = matrix_to_string(&current_matrix);
+                cache_msg.has_text = true;
+                cache_msg.text = text;
+            }
+            if (ImageProcessor::isValidFrame(&current_matrix_0, &previous_matrix_0)) {
+                matrix_cache_img[curr_img_mat] = current_matrix_0;
+                curr_img_mat++;
+                if (curr_img_mat == 16) {
+                    curr_img_mat = 0;
+                    // 转换为指针数组
+                    Matrix256 *frame_ptrs[16];
+                    for (int i = 0; i < 16; i++) {
+                        frame_ptrs[i] = &matrix_cache_img[i];
+                    }
+                    ImageData *img_ptr = ImageProcessor::mergeFrames(frame_ptrs, 16);
+                    if (img_ptr) {
+                        std::string base64_img = image_to_base64(*img_ptr);
+                        cache_msg.has_img = true;
+                        cache_msg.base64_image = base64_img;
+                        delete img_ptr;
+                    }
+                }
+            }
+            if (cache_msg.has_img || cache_msg.has_text) {
+                std::lock_guard<std::mutex> lock(msg_mutex);
+                output_msgs.push_back(cache_msg);
+            }
+            if (next_matrix != nullptr) {
+                delete next_matrix;
+                next_matrix = nullptr;
+            }
+            memcpy(prev_logic_mat.data, curr_logic_mat.data, sizeof(prev_logic_mat.data));
+            memcpy(curr_logic_mat.data, d_neurons[2].detach(0).array, sizeof(curr_logic_mat.data));
+            if (ImageProcessor::isValidFrame(&curr_logic_mat, &prev_logic_mat)) {
+                std::string logic_str = matrix_to_string(&curr_logic_mat);
+                current_logic.push_back(logic_str);
+            } else if ((!current_logic.empty()) || current_logic.size() > 16) {
+                std::string query_logic;
+                for (const auto &i: current_logic) {
+                    query_logic.append(i);
+                }
+
+                current_logic.clear();
+            }
+            std::this_thread::sleep_for(std::chrono::nanoseconds(100));
+            // 等待所有流完成
+            for (int i = 0; i < 4; i++) {
+                cudaStreamSynchronize(streams[i]);
+            }
+        }
+    }
+
+    KFE_STM_Slot get_ext_kfe(const std::string &hash) {
+        KFE_STM_Slot cache_kfe{};
+        ext_kfe.fetchByHash(hash, cache_kfe);
+        return cache_kfe;
+    }
+
+    bool store_kfe(KFE_STM_Slot &slot) {
+        return ext_kfe.store(slot) != 0;
+    }
+
+    [[nodiscard]] double get_avg_activity() const {
+        double avg = 0.0;
+        ull total_neurons = GRID_SIZE * GRID_SIZE * GRID_SIZE;
+        for (ull i = 0; i < total_neurons; i++) {
+            avg += d_neurons[i].get_activity();
+        }
+        return avg / total_neurons;
+    }
+
+    bool exp_kfe(KFE_STM_Slot kfe) {
+        if (get_avg_activity() > 0.75) {
+            ll retry = 20;
+            while (retry > 0) {
+                try {
+                    if (store_kfe(kfe)) break;
+                    retry--;
+                } catch (...) {
+                }
+            }
+            return true;
+        }
+        return false;
+    }
+
+    void resetPointersForSerialization() const {
+        // 重置所有神经元的指针
+        ull total_neurons = GRID_SIZE * GRID_SIZE * GRID_SIZE;
+        for (ull i = 0; i < total_neurons; i++) {
+            d_neurons[i].resetPointersForSerialization();
+        }
+    }
+
+    void copyFrom(const NeuronModel &other) {
+        // 复制基础数据（不复制指针，只复制状态数据）
+        path_default = other.path_default;
+
+        // 复制外部存储状态
+        ext_kfe = other.ext_kfe;
+        sct = other.sct;
+        logic_tree = other.logic_tree;
+
+        // 复制神经元状态（如果需要）
+        ull total_neurons = GRID_SIZE * GRID_SIZE * GRID_SIZE;
+        for (ull i = 0; i < total_neurons; i++) {
+            d_neurons[i] = other.d_neurons[i];
+        }
+    }
+
+    void rebuildPointerConnections() {
+        // 重新构建所有神经元的指针连接
+        for (int idx = 0; idx < GRID_SIZE * GRID_SIZE * GRID_SIZE; idx++) {
+            int x = idx / (GRID_SIZE * GRID_SIZE);
+            int y = (idx / GRID_SIZE) % GRID_SIZE;
+            int z = idx % GRID_SIZE;
+
+            // 重设队列指针
+            d_neurons[idx].setQueuePointer(&queues[x][y][z]);
+
+            // 重设邻居队列指针
+            DeviceQueue<Message, 32> *neighbour_q[6] = {nullptr};
+
+            if (x < GRID_SIZE - 1) {
+                neighbour_q[0] = &queues[x + 1][y][z];
+            }
+            if (x > 0) {
+                neighbour_q[1] = &queues[x - 1][y][z];
+            }
+            if (y < GRID_SIZE - 1) {
+                neighbour_q[2] = &queues[x][y + 1][z];
+            }
+            if (y > 0) {
+                neighbour_q[3] = &queues[x][y - 1][z];
+            }
+            if (z < GRID_SIZE - 1) {
+                neighbour_q[4] = &queues[x][y][z + 1];
+            }
+            if (z > 0) {
+                neighbour_q[5] = &queues[x][y][z - 1];
+            }
+
+            // 重新设置邻居指针
+            d_neurons[idx].setNeighbourQueuePointers(neighbour_q);
+        }
+    }
+
+    // 验证指针有效性
+    bool validatePointers() {
+        ull total_neurons = GRID_SIZE * GRID_SIZE * GRID_SIZE;
+
+        for (ull idx = 0; idx < total_neurons; idx++) {
+            int x = idx / (GRID_SIZE * GRID_SIZE);
+            int y = (idx / GRID_SIZE) % GRID_SIZE;
+            int z = idx % GRID_SIZE;
+
+            // 检查主队列指针
+            if (d_neurons[idx].getQueue() != &queues[x][y][z]) {
+                return false;
+            }
+
+            // 检查邻居队列指针
+            for (int i = 0; i < 6; i++) {
+                DeviceQueue<Message, 32> *expected = nullptr;
+
+                switch (i) {
+                    case 0: if (x < GRID_SIZE - 1) expected = &queues[x + 1][y][z];
+                        break;
+                    case 1: if (x > 0) expected = &queues[x - 1][y][z];
+                        break;
+                    case 2: if (y < GRID_SIZE - 1) expected = &queues[x][y + 1][z];
+                        break;
+                    case 3: if (y > 0) expected = &queues[x][y - 1][z];
+                        break;
+                    case 4: if (z < GRID_SIZE - 1) expected = &queues[x][y][z + 1];
+                        break;
+                    case 5: if (z > 0) expected = &queues[x][y][z - 1];
+                        break;
+                }
+
+                if (d_neurons[idx].getNeighbourQueue(i) != expected) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+};
+
+#endif //SRC_NEURONMODEL_CUH

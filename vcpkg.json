@@ -1,0 +1,9 @@
+{
+  "name": "sintelli-l0demo",
+  "version-string": "0.0.1-dev",
+  "dependencies": [
+    "liblzma",
+    "zeromq",
+    "curl"
+  ]
+}

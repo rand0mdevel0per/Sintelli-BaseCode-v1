@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"E:/Sintelli/src/test-build/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
