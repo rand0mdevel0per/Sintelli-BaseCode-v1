@@ -1001,14 +1001,20 @@ void RAGKnowledgeBaseLoader::cleanupL3Cache(int num_entries_to_remove) {
         auto coldest_entries = external_storage->getColdestK(num_entries_to_remove);
         
         // 移除这些数据
+        int removed_count = 0;
         for (uint64_t slot_id : coldest_entries) {
-            // 注意：ExternalStorage可能没有直接的删除方法，这里只是示意
-            // 实际实现中，这些条目会在下一次访问时从L3加载或被新的数据替换
-            cout << "🧹 清理L3缓存中的冷数据, slot_id: " << slot_id << endl;
+            // 从ExternalStorage中实际删除条目
+            if (external_storage->remove(slot_id)) {
+                cout << "   删除L3缓存条目, slot_id: " << slot_id << endl;
+                removed_count++;
+            } else {
+                cerr << "   删除L3缓存条目失败, slot_id: " << slot_id << endl;
+            }
         }
-        std::cout << "✅ 已清理 " << coldest_entries.size() << " 个L3缓存条目" << std::endl;
+        
+        cout << "✅ 已清理 " << removed_count << " 个L3缓存条目" << endl;
     } catch (const std::exception& e) {
-        std::cerr << "❌ 清理L3缓存失败: " << e.what() << std::endl;
+        cerr << "❌ 清理L3缓存失败: " << e.what() << endl;
     }
 }
 

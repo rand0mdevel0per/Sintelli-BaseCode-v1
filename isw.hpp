@@ -889,10 +889,25 @@ public:
         return stats;
     }
 
-private:
+    bool remove(uint64_t slot_id) {
+        std::lock_guard<std::mutex> lock(storage_mutex);
 
+        auto it = descriptor_map.find(slot_id);
+        if (it == descriptor_map.end()) {
+            return false;
+        }
+
+        try{
+            removeBySlotId(slot_id);
+        }catch (...) {
+            return false;
+        }
+        return true;
+    }
+
+private:
     // 删除数据 喵
-    void remove(uint64_t slot_id) {
+    void removeBySlotId(uint64_t slot_id) {
         std::lock_guard<std::mutex> lock(storage_mutex);
 
         auto it = descriptor_map.find(slot_id);
@@ -928,7 +943,6 @@ private:
         // 移除描述符
         descriptor_map.erase(it);
     }
-
     // ===== 热度管理 =====
 
     // 全局热度衰减(周期性调用) 喵
@@ -986,11 +1000,6 @@ private:
     }
 
     // ===== 统计信息 =====
-
-
-
-
-
     // 获取描述符 喵
     bool getDescriptor(uint64_t slot_id, DataDescriptor& out_desc) const {
         std::lock_guard<std::mutex> lock(storage_mutex);
@@ -1013,8 +1022,6 @@ private:
         }
         return std::nullopt;
     }
-
-private:
     // ===== 内部辅助函数 =====
 
     // 热度转换为vEB树的key(归一化到0-65535) 喵
