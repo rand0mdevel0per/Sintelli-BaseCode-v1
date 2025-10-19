@@ -32,6 +32,17 @@ enum StorageTier {
     TIER_L3_NVME_DISK           // L3: NVMe持久化(冷数据)
 };
 
+struct Statistics {
+    size_t l2_size;
+    size_t l3_size;
+    size_t total_size;
+    double avg_heat;
+    double max_heat;
+    double min_heat;
+    uint32_t current_time;
+    size_t total_memory_bytes;
+};
+
 // ===== 特征向量类型定义 =====
 template<typename T>
 struct FeatureVector {
@@ -851,6 +862,33 @@ public:
         return slot_ids;
     }
 
+    Statistics getStatistics() const {
+        std::lock_guard<std::mutex> lock(storage_mutex);
+
+        Statistics stats;
+        stats.l2_size = l2_memory_pool.size();
+        stats.total_size = descriptor_map.size();
+        stats.l3_size = stats.total_size - stats.l2_size;
+        stats.current_time = current_time;
+        stats.total_memory_bytes = l2_memory_pool.size() * sizeof(T);
+
+        double total_heat = 0.0;
+        stats.max_heat = 0.0;
+        stats.min_heat = 1e9;
+
+        for (const auto& pair : descriptor_map) {
+            double h = pair.second.heat;
+            total_heat += h;
+            stats.max_heat = std::max(stats.max_heat, h);
+            stats.min_heat = std::min(stats.min_heat, h);
+        }
+
+        stats.avg_heat = stats.total_size > 0 ?
+                        (total_heat / stats.total_size) : 0.0;
+
+        return stats;
+    }
+
 private:
 
     // 删除数据 喵
@@ -949,43 +987,9 @@ private:
 
     // ===== 统计信息 =====
 
-    struct Statistics {
-        size_t l2_size;
-        size_t l3_size;
-        size_t total_size;
-        double avg_heat;
-        double max_heat;
-        double min_heat;
-        uint32_t current_time;
-        size_t total_memory_bytes;
-    };
 
-    Statistics getStatistics() const {
-        std::lock_guard<std::mutex> lock(storage_mutex);
 
-        Statistics stats;
-        stats.l2_size = l2_memory_pool.size();
-        stats.total_size = descriptor_map.size();
-        stats.l3_size = stats.total_size - stats.l2_size;
-        stats.current_time = current_time;
-        stats.total_memory_bytes = l2_memory_pool.size() * sizeof(T);
 
-        double total_heat = 0.0;
-        stats.max_heat = 0.0;
-        stats.min_heat = 1e9;
-
-        for (const auto& pair : descriptor_map) {
-            double h = pair.second.heat;
-            total_heat += h;
-            stats.max_heat = std::max(stats.max_heat, h);
-            stats.min_heat = std::min(stats.min_heat, h);
-        }
-
-        stats.avg_heat = stats.total_size > 0 ?
-                        (total_heat / stats.total_size) : 0.0;
-
-        return stats;
-    }
 
     // 获取描述符 喵
     bool getDescriptor(uint64_t slot_id, DataDescriptor& out_desc) const {
@@ -1182,6 +1186,6 @@ private:
         std::remove(filename.c_str());
     }
 
-    };
+};
 
 #endif // GENERIC_EXTERNAL_STORAGE_H

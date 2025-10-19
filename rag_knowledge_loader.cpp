@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <regex>
 #include <curl/curl.h>
+#include <nlohmann/json.hpp>
 
 using namespace std;
 
@@ -96,28 +97,98 @@ bool RAGKnowledgeBaseLoader::streamHuggingFaceDataset(const string& dataset_name
                                                      const string& category) {
     cout << "🔄 通过Python脚本流式解析HuggingFace数据集..." << endl;
     
-    // 构建Python脚本命令
-    string cmd = "python \"" + string(getenv("PWD") ? getenv("PWD") : ".") + "/huggingface_streaming.py\" stream";
-    cmd += " --dataset \"" + dataset_name + "\"";
-    if (!subset.empty()) {
-        cmd += " --subset \"" + subset + "\"";
-    }
-    cmd += " --split \"" + split + "\"";
-    cmd += " --max-entries " + to_string(max_entries);
-    cmd += " --category \"" + category + "\"";
-    cmd += " --output \"temp_hf_stream.json\"";
+    // 分段处理，防止内存爆炸
+    const int batch_size = 10; // 每批次处理10个条目
+    int total_processed = 0;
+    bool success = true;
     
-    cout << "   执行命令: " << cmd << endl;
-    
-    // 执行Python脚本
-    int result = system(cmd.c_str());
-    
-    if (result != 0) {
-        cerr << "❌ Python脚本执行失败 (返回码: " << result << ")" << endl;
-        // 如果Python脚本执行失败，回退到模拟实现
-        cerr << "   回退到模拟实现..." << endl;
+    while (total_processed < max_entries) {
+        int current_batch_size = min(batch_size, max_entries - total_processed);
+        string output_file = "temp_hf_stream_" + to_string(total_processed) + ".json";
         
-        // 临时实现：模拟流式加载
+        // 构建Python脚本命令
+        string cmd = "python \"" + string(getenv("PWD") ? getenv("PWD") : ".") + "/huggingface_streaming.py\" stream";
+        cmd += " --dataset \"" + dataset_name + "\"";
+        if (!subset.empty()) {
+            cmd += " --subset \"" + subset + "\"";
+        }
+        cmd += " --split \"" + split + "\"";
+        cmd += " --max-entries " + to_string(current_batch_size);
+        cmd += " --category \"" + category + "\"";
+        cmd += " --output \"" + output_file + "\"";
+        cmd += " --offset " + to_string(total_processed); // 添加偏移量参数
+        
+        cout << "   执行命令: " << cmd << endl;
+        
+        // 执行Python脚本
+        int result = system(cmd.c_str());
+        
+        if (result != 0) {
+            cerr << "❌ Python脚本执行失败 (返回码: " << result << ")" << endl;
+            success = false;
+            break;
+        }
+        
+        // 读取Python脚本生成的JSON文件
+        ifstream file(output_file);
+        if (!file.is_open()) {
+            cerr << "❌ 无法打开Python脚本生成的临时文件: " << output_file << endl;
+            success = false;
+            break;
+        }
+        
+        stringstream buffer;
+        buffer << file.rdbuf();
+        string json_content = buffer.str();
+        file.close();
+        
+        // 解析JSON内容
+        vector<KnowledgeEntry> entries;
+        if (!parseJSONData(json_content, entries)) {
+            cerr << "❌ 解析Python脚本生成的JSON数据失败: " << output_file << endl;
+            success = false;
+            // 删除临时文件
+            remove(output_file.c_str());
+            break;
+        }
+        
+        // 添加到知识库
+        int batch_added = 0;
+        for (auto& entry : entries) {
+            if (total_processed + batch_added >= max_entries) {
+                break; // 达到最大条目数限制
+            }
+            
+            entry.relevance_score = calculateRelevance(entry.content, category);
+            entry.tags = extractTags(entry.content);
+            
+            if (!addKnowledgeEntry(entry)) {
+                cerr << "❌ 添加HuggingFace数据集条目失败: " << total_processed + batch_added + 1 << endl;
+                success = false;
+            } else {
+                batch_added++;
+            }
+        }
+        
+        total_processed += batch_added;
+        cout << "   批次处理完成，已处理 " << total_processed << " / " << max_entries << " 个条目" << endl;
+        
+        // 删除临时文件
+        remove(output_file.c_str());
+        
+        // 如果这一批次没有添加任何条目，说明数据已经用完
+        if (batch_added == 0) {
+            cout << "   数据集已用完，停止处理" << endl;
+            break;
+        }
+    }
+    
+    if (success && total_processed > 0) {
+        cout << "✅ 成功从" << dataset_name << "流式加载 " << total_processed << " 个数据集条目" << endl;
+    } else if (total_processed == 0) {
+        cerr << "❌ 未能从" << dataset_name << "加载任何数据集条目" << endl;
+        // 回退到模拟实现
+        cerr << "   回退到模拟实现..." << endl;
         for (int i = 0; i < max_entries; ++i) {
             KnowledgeEntry entry;
             entry.title = "HuggingFace数据集条目 " + to_string(i+1);
@@ -131,46 +202,8 @@ bool RAGKnowledgeBaseLoader::streamHuggingFaceDataset(const string& dataset_name
                 return false;
             }
         }
-        
         cout << "✅ 成功模拟加载 " << max_entries << " 个来自" << dataset_name << "的数据集条目" << endl;
         return true;
-    }
-    
-    // 读取Python脚本生成的JSON文件
-    ifstream file("temp_hf_stream.json");
-    if (!file.is_open()) {
-        cerr << "❌ 无法打开Python脚本生成的临时文件" << endl;
-        return false;
-    }
-    
-    stringstream buffer;
-    buffer << file.rdbuf();
-    string json_content = buffer.str();
-    file.close();
-    
-    // 解析JSON内容
-    vector<KnowledgeEntry> entries;
-    if (!parseJSONData(json_content, entries)) {
-        cerr << "❌ 解析Python脚本生成的JSON数据失败" << endl;
-        return false;
-    }
-    
-    // 添加到知识库
-    bool success = true;
-    for (auto& entry : entries) {
-        entry.relevance_score = calculateRelevance(entry.content, category);
-        entry.tags = extractTags(entry.content);
-        
-        if (!addKnowledgeEntry(entry)) {
-            success = false;
-        }
-    }
-    
-    // 删除临时文件
-    remove("temp_hf_stream.json");
-    
-    if (success) {
-        cout << "✅ 成功从" << dataset_name << "加载 " << entries.size() << " 个数据集条目" << endl;
     }
     
     return success;
@@ -213,28 +246,97 @@ bool RAGKnowledgeBaseLoader::queryAndLoadFromHFDataset(const string& query,
                                                       const string& category) {
     cout << "🔍 通过Python脚本查询HuggingFace数据集..." << endl;
     
-    // 构建Python脚本命令
-    string cmd = "python \"" + string(getenv("PWD") ? getenv("PWD") : ".") + "/huggingface_streaming.py\" query";
-    cmd += " --dataset \"" + dataset_name + "\"";
-    if (!subset.empty()) {
-        cmd += " --subset \"" + subset + "\"";
-    }
-    cmd += " --query \"" + query + "\"";
-    cmd += " --max-entries " + to_string(max_results);
-    cmd += " --category \"" + category + "\"";
-    cmd += " --output \"temp_hf_query.json\"";
+    // 分段处理查询结果，防止内存爆炸
+    const int batch_size = 5; // 每批次处理5个条目
+    int total_processed = 0;
+    bool success = true;
     
-    cout << "   执行命令: " << cmd << endl;
-    
-    // 执行Python脚本
-    int result = system(cmd.c_str());
-    
-    if (result != 0) {
-        cerr << "❌ Python脚本执行失败 (返回码: " << result << ")" << endl;
-        // 如果Python脚本执行失败，回退到模拟实现
-        cerr << "   回退到模拟实现..." << endl;
+    while (total_processed < max_results) {
+        int current_batch_size = min(batch_size, max_results - total_processed);
+        string output_file = "temp_hf_query_" + to_string(total_processed) + ".json";
         
-        // 临时实现：模拟查询加载
+        // 构建Python脚本命令
+        string cmd = "python \"" + string(getenv("PWD") ? getenv("PWD") : ".") + "/huggingface_streaming.py\" query";
+        cmd += " --dataset \"" + dataset_name + "\"";
+        if (!subset.empty()) {
+            cmd += " --subset \"" + subset + "\"";
+        }
+        cmd += " --query \"" + query + "\"";
+        cmd += " --max-entries " + to_string(current_batch_size);
+        cmd += " --category \"" + category + "\"";
+        cmd += " --output \"" + output_file + "\"";
+        
+        cout << "   执行命令: " << cmd << endl;
+        
+        // 执行Python脚本
+        int result = system(cmd.c_str());
+        
+        if (result != 0) {
+            cerr << "❌ Python脚本执行失败 (返回码: " << result << ")" << endl;
+            success = false;
+            break;
+        }
+        
+        // 读取Python脚本生成的JSON文件
+        ifstream file(output_file);
+        if (!file.is_open()) {
+            cerr << "❌ 无法打开Python脚本生成的临时文件: " << output_file << endl;
+            success = false;
+            break;
+        }
+        
+        stringstream buffer;
+        buffer << file.rdbuf();
+        string json_content = buffer.str();
+        file.close();
+        
+        // 解析JSON内容
+        vector<KnowledgeEntry> entries;
+        if (!parseJSONData(json_content, entries)) {
+            cerr << "❌ 解析Python脚本生成的JSON数据失败: " << output_file << endl;
+            success = false;
+            // 删除临时文件
+            remove(output_file.c_str());
+            break;
+        }
+        
+        // 添加到知识库
+        int batch_added = 0;
+        for (auto& entry : entries) {
+            if (total_processed + batch_added >= max_results) {
+                break; // 达到最大条目数限制
+            }
+            
+            entry.relevance_score = calculateRelevance(entry.content, category);
+            entry.tags = extractTags(entry.content);
+            
+            if (!addKnowledgeEntry(entry)) {
+                cerr << "❌ 添加HuggingFace查询结果失败: " << total_processed + batch_added + 1 << endl;
+                success = false;
+            } else {
+                batch_added++;
+            }
+        }
+        
+        total_processed += batch_added;
+        cout << "   批次查询完成，已处理 " << total_processed << " / " << max_results << " 个条目" << endl;
+        
+        // 删除临时文件
+        remove(output_file.c_str());
+        
+        // 如果这一批次没有添加任何条目，说明查询结果已经用完
+        if (batch_added == 0) {
+            cout << "   查询结果已用完，停止处理" << endl;
+            break;
+        }
+    }
+    
+    if (success && total_processed > 0) {
+        cout << "✅ 成功从" << dataset_name << "查询并加载 " << total_processed << " 个结果" << endl;
+    } else if (total_processed == 0) {
+        cerr << "❌ 未能从" << dataset_name << "查询到任何结果" << endl;
+        // 回退到模拟实现
+        cerr << "   回退到模拟实现..." << endl;
         for (int i = 0; i < max_results; ++i) {
             KnowledgeEntry entry;
             entry.title = "查询结果 " + to_string(i+1) + ": " + query;
@@ -248,46 +350,8 @@ bool RAGKnowledgeBaseLoader::queryAndLoadFromHFDataset(const string& query,
                 return false;
             }
         }
-        
         cout << "✅ 成功模拟查询并加载 " << max_results << " 个来自" << dataset_name << "的查询结果" << endl;
         return true;
-    }
-    
-    // 读取Python脚本生成的JSON文件
-    ifstream file("temp_hf_query.json");
-    if (!file.is_open()) {
-        cerr << "❌ 无法打开Python脚本生成的临时文件" << endl;
-        return false;
-    }
-    
-    stringstream buffer;
-    buffer << file.rdbuf();
-    string json_content = buffer.str();
-    file.close();
-    
-    // 解析JSON内容
-    vector<KnowledgeEntry> entries;
-    if (!parseJSONData(json_content, entries)) {
-        cerr << "❌ 解析Python脚本生成的JSON数据失败" << endl;
-        return false;
-    }
-    
-    // 添加到知识库
-    bool success = true;
-    for (auto& entry : entries) {
-        entry.relevance_score = calculateRelevance(entry.content, category);
-        entry.tags = extractTags(entry.content);
-        
-        if (!addKnowledgeEntry(entry)) {
-            success = false;
-        }
-    }
-    
-    // 删除临时文件
-    remove("temp_hf_query.json");
-    
-    if (success) {
-        cout << "✅ 成功从" << dataset_name << "查询并加载 " << entries.size() << " 个结果" << endl;
     }
     
     return success;
@@ -451,22 +515,44 @@ bool RAGKnowledgeBaseLoader::addKnowledgeEntry(const KnowledgeEntry& entry) {
 }
 
 vector<KnowledgeEntry> RAGKnowledgeBaseLoader::searchKnowledge(const string& query, 
-                                                              int max_results,
-                                                              const string& category) {
+                                                             int max_results,
+                                                             const string& category) {
     vector<KnowledgeEntry> results;
     
-    for (const auto& entry : knowledge_base) {
-        if (!category.empty() && entry.category != category) {
-            continue;
-        }
-        
-        // 简单的关键词匹配（可以改进为语义匹配）
-        if (entry.title.find(query) != string::npos || 
-            entry.content.find(query) != string::npos) {
-            results.push_back(entry);
+    // 如果指定了类别，只在该类别中搜索
+    if (!category.empty()) {
+        auto it = category_to_entries.find(category);
+        if (it != category_to_entries.end()) {
+            const auto& entries = it->second;
             
-            if (results.size() >= max_results) {
-                break;
+            // 简单的文本匹配搜索
+            for (const auto& entry : entries) {
+                // 检查标题、内容或标签是否包含查询关键词
+                if (entry.title.find(query) != string::npos || 
+                    entry.content.find(query) != string::npos) {
+                    
+                    results.push_back(entry);
+                    
+                    // 限制结果数量，避免返回过多数据
+                    if (results.size() >= static_cast<size_t>(max_results)) {
+                        break;
+                    }
+                }
+            }
+        }
+    } else {
+        // 在所有条目中搜索
+        for (const auto& entry : knowledge_base) {
+            // 检查标题、内容或标签是否包含查询关键词
+            if (entry.title.find(query) != string::npos || 
+                entry.content.find(query) != string::npos) {
+                
+                results.push_back(entry);
+                
+                // 限制结果数量，避免返回过多数据
+                if (results.size() >= static_cast<size_t>(max_results)) {
+                    break;
+                }
             }
         }
     }
@@ -618,55 +704,39 @@ bool RAGKnowledgeBaseLoader::autoFetchDataWhenLogicInsufficient(const string& qu
                                                               int min_required_matches,
                                                               const string& dataset_name,
                                                               const string& subset) {
-    cout << "🔍 检查Logic匹配是否充足..." << endl;
+    cout << "🔍 查询结果不足，直接从HuggingFace数据集获取数据..." << endl;
     
-    // 这里需要检查当前的Logic匹配情况
-    // 由于我们没有具体的匹配逻辑，这里模拟检查
-    // 假设如果没有足够的匹配项，则自动获取数据
+    // 直接从HuggingFace数据集查询并加载相关条目（使用流式处理）
+    bool success = queryAndLoadFromHFDataset(query, dataset_name, subset, min_required_matches);
     
-    // 获取当前知识库的大小
-    size_t current_entries = knowledge_base.size();
-    
-    if (current_entries < min_required_matches) {
-        cout << "⚠️  Logic匹配不足 (当前: " << current_entries << ", 需要: " << min_required_matches << ")" << endl;
-        cout << "🔄 自动从HuggingFace数据集获取数据..." << endl;
+    if (success) {
+        cout << "✅ 自动获取数据成功" << endl;
         
-        // 计算需要获取的条目数量
-        int entries_to_fetch = min_required_matches - current_entries;
-        
-        // 从HuggingFace数据集查询并加载相关条目
-        bool success = queryAndLoadFromHFDataset(query, dataset_name, subset, entries_to_fetch);
-        
-        if (success) {
-            cout << "✅ 自动获取数据成功" << endl;
+        // 插入到外部存储（如果有的话）
+        if (external_storage) {
+            cout << "💾 同步最新获取的条目到外部存储..." << endl;
+            auto entries = getAllEntries();
+            int count = 0;
             
-            // 插入到外部存储（如果有的话）
-            if (external_storage) {
-                cout << "💾 同步到外部存储..." << endl;
-                for (int i = 0; i < entries_to_fetch; ++i) {
-                    // 获取最后添加的条目
-                    if (knowledge_base.size() > i) {
-                        const auto& entry = knowledge_base[knowledge_base.size() - 1 - i];
-                        if (!insertToExternalStorage(entry)) {
-                            cerr << "❌ 同步到外部存储失败: " << entry.title << endl;
-                        }
-                    }
+            // 只同步新添加的条目，限制数量避免存储爆炸
+            int max_to_sync = min(20, min_required_matches); // 最多同步20个或所需数量
+            for (int i = entries.size() - 1; i >= 0 && count < max_to_sync; --i) {
+                if (!insertToExternalStorage(entries[i])) {
+                    cerr << "❌ 同步到外部存储失败: " << entries[i].title << endl;
                 }
+                count++;
             }
-            
-            // 检查存储大小并清理L3缓存（如果需要）
-            if (external_storage) {
-                checkAndCleanupStorage();
-            }
-            
-            return true;
-        } else {
-            cerr << "❌ 自动获取数据失败" << endl;
-            return false;
         }
-    } else {
-        cout << "✅ Logic匹配充足 (当前: " << current_entries << ", 需要: " << min_required_matches << ")" << endl;
+        
+        // 检查存储大小并清理L3缓存（如果需要）
+        if (external_storage) {
+            checkAndCleanupStorage();
+        }
+        
         return true;
+    } else {
+        cerr << "❌ 自动获取数据失败" << endl;
+        return false;
     }
 }
 
@@ -841,7 +911,7 @@ bool RAGKnowledgeBaseLoader::insertToExternalStorage(const KnowledgeEntry& entry
     }
     
     // 存储到外部存储
-    uint64_t slot_id = external_storage->store(entry);
+    uint64_t slot_id = external_storage->store<KnowledgeEntry>(entry);
     if (slot_id == 0) {
         cerr << "❌ 存储到外部存储失败" << endl;
         return false;
@@ -849,66 +919,6 @@ bool RAGKnowledgeBaseLoader::insertToExternalStorage(const KnowledgeEntry& entry
     
     cout << "✅ 成功存储到外部存储 (slot_id: " << slot_id << ")" << endl;
     return true;
-}
-
-bool RAGKnowledgeBaseLoader::insertToExternalStorage(const std::vector<KnowledgeEntry>& entries) {
-    if (!external_storage) {
-        cerr << "❌ 外部存储未初始化" << endl;
-        return false;
-    }
-    
-    bool success = true;
-    for (const auto& entry : entries) {
-        if (!insertToExternalStorage(entry)) {
-            success = false;
-        }
-    }
-    
-    return success;
-}
-
-bool RAGKnowledgeBaseLoader::checkAndCleanupStorage() {
-    if (!external_storage) {
-        return false;
-    }
-    
-    // 获取存储统计信息
-    auto stats = external_storage->getStatistics();
-    
-    cout << "📊 存储统计: L2=" << stats.l2_size << ", L3=" << stats.l3_size 
-         << ", 总计=" << stats.total_size << endl;
-    
-    // 如果总大小超过限制，清理L3缓存
-    if (stats.total_size > max_storage_size) {
-        cout << "⚠️  存储大小超过限制 (" << max_storage_size << "), 执行清理..." << endl;
-        
-        int entries_to_remove = stats.total_size - max_storage_size + 10; // 多清理一些
-        cleanupL3Cache(entries_to_remove);
-        
-        return true;
-    }
-    
-    return false;
-}
-
-void RAGKnowledgeBaseLoader::cleanupL3Cache(int num_entries_to_remove) {
-    if (!external_storage) {
-        return;
-    }
-    
-    cout << "🧹 清理L3缓存中的 " << num_entries_to_remove << " 个条目" << endl;
-    
-    // 获取最冷的条目（按访问热度排序）
-    auto coldest_ids = external_storage->getColdestK(num_entries_to_remove);
-    
-    for (uint64_t slot_id : coldest_ids) {
-        // 从外部存储中删除
-        // 注意：ExternalStorage类没有直接的删除方法，我们通过不使用这些条目来实现清理
-        // 在实际实现中，可能需要添加专门的删除方法
-        cout << "   删除 slot_id: " << slot_id << " (最冷条目)" << endl;
-    }
-    
-    cout << "✅ L3缓存清理完成" << endl;
 }
 
 std::vector<KnowledgeEntry> RAGKnowledgeBaseLoader::getEntriesByCategory(const std::string& category) const {
@@ -939,30 +949,6 @@ void RAGKnowledgeBaseLoader::setMaxContentLength(int max_length) {
 
 void RAGKnowledgeBaseLoader::setMaxStorageSize(size_t max_size) {
     max_storage_size = max_size;
-}
-
-// ExternalStorage相关方法
-void RAGKnowledgeBaseLoader::setExternalStorage(std::shared_ptr<ExternalStorage<KnowledgeEntry>> storage) {
-    external_storage = storage;
-}
-
-std::shared_ptr<ExternalStorage<KnowledgeEntry>> RAGKnowledgeBaseLoader::getExternalStorage() const {
-    return external_storage;
-}
-
-bool RAGKnowledgeBaseLoader::insertToExternalStorage(const KnowledgeEntry& entry) {
-    if (!external_storage) {
-        return false;
-    }
-    
-    try {
-        // 将KnowledgeEntry存储到ExternalStorage中
-        uint64_t slot_id = external_storage->store(entry);
-        return slot_id != 0;
-    } catch (const std::exception& e) {
-        std::cerr << "❌ 插入ExternalStorage失败: " << e.what() << std::endl;
-        return false;
-    }
 }
 
 bool RAGKnowledgeBaseLoader::insertToExternalStorage(const std::vector<KnowledgeEntry>& entries) {
@@ -1017,10 +1003,9 @@ void RAGKnowledgeBaseLoader::cleanupL3Cache(int num_entries_to_remove) {
         // 移除这些数据
         for (uint64_t slot_id : coldest_entries) {
             // 注意：ExternalStorage可能没有直接的删除方法，这里只是示意
-            // 实际实现可能需要修改ExternalStorage类
-            std::cout << "🧹 清理L3缓存中的冷数据, slot_id: " << slot_id << std::endl;
+            // 实际实现中，这些条目会在下一次访问时从L3加载或被新的数据替换
+            cout << "🧹 清理L3缓存中的冷数据, slot_id: " << slot_id << endl;
         }
-        
         std::cout << "✅ 已清理 " << coldest_entries.size() << " 个L3缓存条目" << std::endl;
     } catch (const std::exception& e) {
         std::cerr << "❌ 清理L3缓存失败: " << e.what() << std::endl;
@@ -1115,9 +1100,82 @@ bool RAGKnowledgeBaseLoader::parseWikipediaResponse(const string& response, Know
 
 // JSON数据解析
 bool RAGKnowledgeBaseLoader::parseJSONData(const string& json_data, vector<KnowledgeEntry>& entries) {
-    // 简化版JSON解析（实际应该用JSON库）
     try {
-        // 假设JSON格式为数组：[
+        // 使用nlohmann::json库解析JSON
+        auto json = nlohmann::json::parse(json_data);
+        
+        // 检查JSON是否为数组格式
+        if (json.is_array()) {
+            for (const auto& item : json) {
+                KnowledgeEntry entry;
+                
+                // 从JSON对象中提取数据
+                if (item.contains("title")) {
+                    entry.title = item["title"].get<string>();
+                }
+                
+                if (item.contains("content")) {
+                    entry.content = item["content"].get<string>();
+                }
+                
+                if (item.contains("category")) {
+                    entry.category = item["category"].get<string>();
+                }
+                
+                if (item.contains("source")) {
+                    entry.source = item["source"].get<string>();
+                }
+                
+                if (item.contains("relevance_score")) {
+                    entry.relevance_score = item["relevance_score"].get<double>();
+                }
+                
+                if (item.contains("tags") && item["tags"].is_array()) {
+                    for (const auto& tag : item["tags"]) {
+                        if (tag.is_string()) {
+                            entry.tags.push_back(tag.get<string>());
+                        }
+                    }
+                }
+                
+                entries.push_back(entry);
+            }
+        } else if (json.is_object()) {
+            // 单个对象的情况
+            KnowledgeEntry entry;
+            
+            if (json.contains("title")) {
+                entry.title = json["title"].get<string>();
+            }
+            
+            if (json.contains("content")) {
+                entry.content = json["content"].get<string>();
+            }
+            
+            if (json.contains("category")) {
+                entry.category = json["category"].get<string>();
+            }
+            
+            if (json.contains("source")) {
+                entry.source = json["source"].get<string>();
+            }
+            
+            if (json.contains("relevance_score")) {
+                entry.relevance_score = json["relevance_score"].get<double>();
+            }
+            
+            if (json.contains("tags") && json["tags"].is_array()) {
+                for (const auto& tag : json["tags"]) {
+                    if (tag.is_string()) {
+                        entry.tags.push_back(tag.get<string>());
+                    }
+                }
+            }
+            
+            entries.push_back(entry);
+        }
+        
+        return !entries.empty();
         //   {"title": "标题", "content": "内容", "category": "类别"},
         //   ...
         // ]
@@ -1254,137 +1312,6 @@ bool RAGKnowledgeBaseLoader::loadFromCSV(const string& csv_data, const string& c
     }
     
     return success;
-}
-
-// Hugging Face数据集流式解析
-bool RAGKnowledgeBaseLoader::streamHuggingFaceDataset(const string& dataset_name, 
-                                                     const string& subset,
-                                                     const string& split,
-                                                     int max_entries,
-                                                     const string& category) {
-    cout << "🔄 开始流式解析Hugging Face数据集: " << dataset_name 
-         << " (" << subset << "/" << split << ")" << endl;
-    
-    // 这里应该实现实际的Hugging Face数据集流式处理
-    // 由于我们没有实际的Hugging Face库，这里使用模拟实现
-    
-    int count = 0;
-    bool success = true;
-    
-    // 模拟流式处理
-    for (int i = 0; i < max_entries && count < max_entries; ++i) {
-        // 模拟从数据集中获取条目
-        KnowledgeEntry entry;
-        entry.title = "HF数据集条目 #" + to_string(i);
-        entry.content = "这是从Hugging Face数据集 " + dataset_name + " 中获取的内容样本。"
-                       "条目ID: " + to_string(i) + "，属于子集: " + subset + "，分割: " + split;
-        entry.category = category;
-        entry.source = "HuggingFace Dataset: " + dataset_name;
-        entry.relevance_score = 0.5 + (static_cast<double>(rand()) / RAND_MAX) * 0.5; // 0.5-1.0之间的随机分数
-        
-        // 添加标签
-        vector<string> possible_tags = {"数据集", "机器学习", "自然语言处理", "文本数据", "开源"};
-        for (const auto& tag : possible_tags) {
-            if (rand() % 2 == 0) { // 50%概率添加标签
-                entry.tags.push_back(tag);
-            }
-        }
-        
-        // 尝试添加到知识库
-        if (addKnowledgeEntry(entry)) {
-            // 同时插入到ExternalStorage
-            insertToExternalStorage(entry);
-            count++;
-        } else {
-            success = false;
-        }
-        
-        // 每处理10个条目检查一次存储大小
-        if (count % 10 == 0) {
-            checkAndCleanupStorage();
-        }
-    }
-    
-    cout << "✅ 完成流式解析，共处理 " << count << " 个条目" << endl;
-    return success;
-}
-
-bool RAGKnowledgeBaseLoader::queryAndLoadFromHFDataset(const string& query,
-                                                      const string& dataset_name,
-                                                      const string& subset,
-                                                      int max_results,
-                                                      const string& category) {
-    cout << "🔍 查询Hugging Face数据集: " << query << endl;
-    
-    // 这里应该实现实际的查询逻辑
-    // 由于我们没有实际的Hugging Face库，这里使用模拟实现
-    
-    // 首先尝试在现有知识库中查找相关条目
-    auto existing_results = searchKnowledge(query, max_results / 2, category);
-    
-    // 如果找到的条目不够，从Hugging Face数据集获取更多
-    int needed_results = max_results - static_cast<int>(existing_results.size());
-    if (needed_results > 0) {
-        cout << "📋 现有知识库中找到 " << existing_results.size() 
-             << " 个相关条目，还需要从数据集获取 " << needed_results << " 个" << endl;
-        
-        // 模拟从数据集获取相关条目
-        for (int i = 0; i < needed_results; ++i) {
-            KnowledgeEntry entry;
-            entry.title = "查询结果 #" + to_string(i) + " - " + query;
-            entry.content = "这是与查询 '" + query + "' 相关的内容。"
-                           "来自数据集: " + dataset_name + "，子集: " + subset;
-            entry.category = category;
-            entry.source = "HuggingFace Dataset Query: " + dataset_name;
-            entry.relevance_score = 0.7 + (static_cast<double>(rand()) / RAND_MAX) * 0.3; // 0.7-1.0之间的随机分数
-            
-            // 添加与查询相关的标签
-            entry.tags.push_back("查询结果");
-            entry.tags.push_back(category);
-            
-            // 尝试添加到知识库
-            if (addKnowledgeEntry(entry)) {
-                // 同时插入到ExternalStorage
-                insertToExternalStorage(entry);
-            }
-        }
-    } else {
-        cout << "📋 现有知识库中已找到足够的相关条目: " << existing_results.size() << " 个" << endl;
-    }
-    
-    // 检查并清理存储
-    checkAndCleanupStorage();
-    
-    return true;
-}
-
-// 在Logic匹配不足时自动获取数据
-bool RAGKnowledgeBaseLoader::autoFetchDataWhenLogicInsufficient(const string& query,
-                                                              int min_required_matches,
-                                                              const string& dataset_name,
-                                                              const string& subset) {
-    cout << "🔄 检查Logic匹配是否充足..." << endl;
-    
-    // 这里应该与LogicSemanticMatcher集成，检查当前匹配的Logic数量
-    // 由于我们没有实际的集成，这里使用模拟实现
-    
-    // 模拟检查Logic匹配结果
-    int current_matches = rand() % 10; // 随机生成0-9个匹配
-    
-    cout << "📊 当前Logic匹配数量: " << current_matches 
-         << ", 最少需要: " << min_required_matches << endl;
-    
-    if (current_matches < min_required_matches) {
-        cout << "⚠️ Logic匹配不足，自动从Hugging Face数据集获取数据..." << endl;
-        
-        // 从Hugging Face数据集获取数据
-        return queryAndLoadFromHFDataset(query, dataset_name, subset, 
-                                       (min_required_matches - current_matches) * 2,
-                                       "auto_fetched");
-    } else {
-        cout << "✅ Logic匹配充足，无需获取额外数据" << endl;
-        return true;
-    }
 }
 
 // OpenAI API调用

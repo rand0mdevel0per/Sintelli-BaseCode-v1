@@ -10,7 +10,7 @@ import argparse
 from datasets import load_dataset
 import traceback
 
-def stream_huggingface_dataset(dataset_name, subset, split, max_entries, category, output_file):
+def stream_huggingface_dataset(dataset_name, subset, split, max_entries, category, output_file, offset=0):
     """
     流式解析HuggingFace数据集并输出到文件
     
@@ -21,6 +21,7 @@ def stream_huggingface_dataset(dataset_name, subset, split, max_entries, categor
         max_entries: 最大条目数
         category: 类别
         output_file: 输出文件路径
+        offset: 偏移量，跳过前offset个条目
     """
     try:
         print(f"🔍 加载数据集: {dataset_name}")
@@ -31,15 +32,21 @@ def stream_huggingface_dataset(dataset_name, subset, split, max_entries, categor
         
         entries = []
         count = 0
+        skipped = 0
         
         print(f"📥 流式获取数据...")
         for item in dataset:
+            # 跳过offset个条目
+            if skipped < offset:
+                skipped += 1
+                continue
+                
             if count >= max_entries:
                 break
             
             # 将数据转换为KnowledgeEntry格式
             entry = {
-                "title": f"HF数据集条目 {count+1}",
+                "title": f"HF数据集条目 {count+1+offset}",
                 "content": str(item),
                 "category": category,
                 "source": f"huggingface://{dataset_name}/{subset}/{split}",
@@ -133,6 +140,7 @@ def main():
     parser.add_argument('--query', default='', help='查询关键词')
     parser.add_argument('--category', default='huggingface', help='类别')
     parser.add_argument('--output', required=True, help='输出文件路径')
+    parser.add_argument('--offset', type=int, default=0, help='偏移量')
     
     args = parser.parse_args()
     
@@ -142,7 +150,8 @@ def main():
     if args.action == 'stream':
         success = stream_huggingface_dataset(
             args.dataset, args.subset, args.split, 
-            args.max_entries, args.category, args.output
+            args.max_entries, args.category, args.output,
+            args.offset
         )
     elif args.action == 'query':
         if not args.query:
