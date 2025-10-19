@@ -89,7 +89,15 @@ std::cout << "语义相似度: " << similarity << std::endl;
 ### Hugging Face集成
 - 通过Python脚本`huggingface_streaming.py`实现真实的Hugging Face数据集处理
 - C++代码通过系统调用执行Python脚本并解析返回的JSON数据
+- 支持流式处理，防止内存爆炸，分批获取和处理数据
 - 在Python环境不可用时回退到模拟实现
+
+### 流式处理机制
+- **分批处理**：将大量数据分成小批次处理，每批次默认处理10个条目
+- **临时文件管理**：每个批次处理完成后立即删除临时JSON文件，释放磁盘空间
+- **偏移量支持**：支持从指定位置开始获取数据，避免重复处理
+- **内存控制**：通过分批处理有效控制内存使用，防止存储爆炸
+- **智能同步**：只将最新获取的相关条目同步到ExternalStorage，避免存储爆炸
 
 ### 语义查询引擎
 - 独立的`SemanticQueryEngine`类，避免了之前错误嵌套在ExternalStorage中的问题
