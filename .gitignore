@@ -1,6 +1,55 @@
-*.i
-*.ii
-*.gpu
-*.ptx
-*.cubin
-*.fatbin
+# Build directories
+build/
+cmake-build-*/
+test-build/
+
+# IDE files
+.idea/
+*.iml
+
+# Cache directories
+.cache/
+
+# External libraries (already managed by vcpkg)
+cutlass/
+json/
+#tokenizers/
+onnx/
+
+# vcpkg installed dependencies
+vcpkg_installed/
+
+# Model files (large binary files)
+models/e5/e5_large.onnx
+
+# Tokenizer config files (should be tracked)
+models/vocab.json
+models/special_tokens.json
+models/merges.txt
+
+# Compiled binaries
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Object files
+*.o
+*.obj
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+*.cmake
+
+# Compilation databases
+compile_commands.json
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+progress.md
+progress.archieve.md
+IFLOW.md

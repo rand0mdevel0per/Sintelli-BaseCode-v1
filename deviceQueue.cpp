@@ -1,0 +1,96 @@
+//
+// Created by ASUS on 9/29/2025.
+//
+
+#ifndef CUDA_DEVICE_QUEUE_CUH
+#define CUDA_DEVICE_QUEUE_CUH
+
+#include <cuda_runtime.h>
+
+template<typename T, int CAPACITY>
+struct DeviceQueue {
+    T data[CAPACITY];
+    unsigned long long head;
+    unsigned long long tail;
+
+    __device__ void init() {
+        head = 0ULL;
+        tail = 0ULL;
+    }
+
+    __device__ bool push(const T& item) {
+        // 原子地获取并递增tail
+        unsigned long long old_tail = atomicAdd(&tail, 1ULL);
+
+        // 检查队列是否已满
+        unsigned long long current_head = atomicAdd(&head, 0ULL);
+        if (old_tail - current_head >= CAPACITY) {
+            // 队列满，回退tail
+            atomicAdd(&tail, -1LL);
+            return false;
+        }
+
+        // 使用环形缓冲区索引
+        int pos = (int)(old_tail % CAPACITY);
+        data[pos] = item;
+
+        return true;
+    }
+
+    __device__ bool pop(T& result) {
+        // 原子地获取并递增head
+        unsigned long long old_head = atomicAdd(&head, 1ULL);
+
+        // 检查队列是否为空
+        unsigned long long current_tail = atomicAdd(&tail, 0ULL);
+        if (old_head >= current_tail) {
+            // 队列空，回退head
+            atomicAdd(&head, -1LL);
+            return false;
+        }
+
+        // 使用环形缓冲区索引
+        int pos = (int)(old_head % CAPACITY);
+        result = data[pos];
+
+        return true;
+    }
+
+    [[nodiscard]] __device__ bool empty() const {
+        unsigned long long current_head = atomicAdd((unsigned long long*)&head, 0ULL);
+        unsigned long long current_tail = atomicAdd((unsigned long long*)&tail, 0ULL);
+        return current_head >= current_tail;
+    }
+
+    [[nodiscard]] __device__ bool full() const {
+        unsigned long long current_head = atomicAdd((unsigned long long*)&head, 0ULL);
+        unsigned long long current_tail = atomicAdd((unsigned long long*)&tail, 0ULL);
+        return (current_tail - current_head) >= CAPACITY;
+    }
+
+    [[nodiscard]] __device__ int size() const {
+        unsigned long long current_head = atomicAdd((unsigned long long*)&head, 0ULL);
+        unsigned long long current_tail = atomicAdd((unsigned long long*)&tail, 0ULL);
+        return (int)(current_tail - current_head);
+    }
+};
+
+// 使用示例：
+// __device__ DeviceQueue<Message, 1024> message_queue;
+//
+// __global__ void producer_kernel() {
+//     Message msg;
+//     // ... 填充msg
+//     if (!message_queue.push(msg)) {
+//         // 处理队列满的情况
+//     }
+// }
+//
+// __global__ void consumer_kernel() {
+//     Message msg;
+//     if (message_queue.pop(msg)) {
+//         // 处理msg
+//     }
+// }
+
+#endif // CUDA_DEVICE_QUEUE_CUH
