@@ -441,6 +441,10 @@ public:
         heat_index = std::make_unique<vEB_Tree<DataDescriptor>>(65536);
     }
 
+    // 禁止拷贝构造和拷贝赋值
+    ExternalStorage(const ExternalStorage&) = delete;
+    ExternalStorage& operator=(const ExternalStorage&) = delete;
+
     // ===== 核心API =====
 
     // 存储数据(需要数据提供hash()函数) 喵

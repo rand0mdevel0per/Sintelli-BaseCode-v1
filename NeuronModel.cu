@@ -25,34 +25,10 @@
 #include "memory_slot.h"
 #include <Windows.h>
 #include "rag_knowledge_loader.cpp"
+#include "huggingface_rag_integration.cpp"
 
 #define ll long long
 #define ull unsigned ll
-
-char* wideCharToMultiByte(wchar_t* pWCStrKey)
-{
-    //第一次调用确认转换后单字节字符串的长度，用于开辟空间
-    int pSize = WideCharToMultiByte(CP_OEMCP, 0, pWCStrKey, wcslen(pWCStrKey), NULL, 0, NULL, NULL);
-    char* pCStrKey = new char[pSize+1];
-    //第二次调用将双字节字符串转换成单字节字符串
-    WideCharToMultiByte(CP_OEMCP, 0, pWCStrKey, wcslen(pWCStrKey), pCStrKey, pSize, NULL, NULL);
-    pCStrKey[pSize] = '\0';
-    return pCStrKey;
-
-    //如果想要转换成string，直接赋值即可
-    //string pKey = pCStrKey;
-}
-
-wchar_t *multiByteToWideChar(const std::string& pKey)
-{
-    const char *pCStrKey = pKey.c_str();
-    //第一次调用返回转换后的字符串长度，用于确认为wchar_t*开辟多大的内存空间
-    int pSize = MultiByteToWideChar(CP_OEMCP, 0, pCStrKey, strlen(pCStrKey) + 1, NULL, 0);
-    wchar_t *pWCStrKey = new wchar_t[pSize];
-    //第二次调用将单字节字符串转换成双字节字符串
-    MultiByteToWideChar(CP_OEMCP, 0, pCStrKey, strlen(pCStrKey) + 1, pWCStrKey, pSize);
-    return pWCStrKey;
-}
 
 /**
  * @brief Template class for managing a 3D grid of neurons.
@@ -74,19 +50,33 @@ public:
     NeuronModel() : processor(e5), logic_processor(e5), memory_processor(e5), sct_processor(e5) {
         NeuronModel(32);
     }
+
     /**
      * @brief Initializes the neuron grid and associated systems.
      *
      * Allocates memory for neurons and sets up semantic matching components.
      */
     NeuronModel(ull grid_size) : processor(e5), logic_processor(e5), memory_processor(e5), sct_processor(e5) {
+        if (grid_size != 0) {
+            GRID_SIZE = grid_size;
+        }
+
+        // 初始化计算相关常量
+        NEURON_COUNT = GRID_SIZE * GRID_SIZE * GRID_SIZE;
+        NUM_BLOCKS = (NEURON_COUNT + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
+
+        // 初始化队列数组
+        queues.resize(GRID_SIZE);
+        for (ull i = 0; i < GRID_SIZE; i++) {
+            queues[i].resize(GRID_SIZE);
+            for (ull j = 0; j < GRID_SIZE; j++) {
+                queues[i][j].resize(GRID_SIZE);
+            }
+        }
+
         cudaMalloc(&d_active_flags, NEURON_COUNT * sizeof(bool));
         for (int i = 0; i < 4; i++) {
             cudaStreamCreate(&streams[i]);
-        }
-
-        if (grid_size != 0) {
-            GRID_SIZE = grid_size;
         }
 
         // 初始化：全部激活
@@ -146,37 +136,37 @@ public:
             // +X方向
             if (x < GRID_SIZE - 1) {
                 neighbour_q[0] = &queues[x + 1][y][z]; // 指向邻居的-X队列
-            }else {
+            } else {
                 neighbour_q[0] = &queues[x - 1][y][z]; // 指向邻居的+X队列
             }
             // -X方向
             if (x > 0) {
                 neighbour_q[1] = &queues[x - 1][y][z]; // 指向邻居的+X队列
-            }else {
+            } else {
                 neighbour_q[1] = &queues[x + 1][y][z]; // 指向邻居的-X队列
             }
             // +Y方向
             if (y < GRID_SIZE - 1) {
                 neighbour_q[2] = &queues[x][y + 1][z];
-            }else {
+            } else {
                 neighbour_q[2] = &queues[x][y - 1][z];
             }
             // -Y方向
             if (y > 0) {
                 neighbour_q[3] = &queues[x][y - 1][z];
-            }else {
+            } else {
                 neighbour_q[3] = &queues[x][y + 1][z];
             }
             // +Z方向
             if (z < GRID_SIZE - 1) {
                 neighbour_q[4] = &queues[x][y][z + 1];
-            }else {
+            } else {
                 neighbour_q[4] = &queues[x][y][z - 1];
             }
             // -Z方向
             if (z > 0) {
                 neighbour_q[5] = &queues[x][y][z - 1];
-            }else {
+            } else {
                 neighbour_q[5] = &queues[x][y][z + 1];
             }
 
@@ -188,11 +178,12 @@ public:
         std::cout << "分布式神经元系统初始化完成喵!" << std::endl;
     }
 
-    explicit NeuronModel(std::string path) : processor(e5), logic_processor(e5), memory_processor(e5), sct_processor(e5) {
+    explicit NeuronModel(std::string path) : processor(e5), logic_processor(e5), memory_processor(e5),
+                                             sct_processor(e5) {
         // 使用委派构造函数
         NeuronModel(2);
         path_default = path;
-        if(!load(path)) {
+        if (!load(path)) {
             throw std::runtime_error("Failed to load model from path: " + path);
         }
     }
@@ -218,7 +209,11 @@ public:
             // 保存前重置指针
             resetPointersForSerialization();
 
-            bool result = Serializer<NeuronModel>::save(*this, path);
+            // 创建一个临时对象用于序列化，排除不能拷贝的成员
+            NeuronModel temp_model(GRID_SIZE);
+            temp_model.copyFrom(*this);
+
+            bool result = Serializer<NeuronModel>::save(temp_model, path);
 
             // 保存后恢复指针连接
             rebuildPointerConnections();
@@ -407,9 +402,9 @@ public:
             if (msg.has_text) {
                 processTextString(&processor, msg.text);
                 std::vector<float> txt_d = feature_extractor->extractTextFeature(msg.text).data;
-                float* text_data = new float[txt_d.size()];
+                float *text_data = new float[txt_d.size()];
                 memcpy(text_data, txt_d.data(), txt_d.size() * sizeof(float));
-                double* text_data_d = new double[txt_d.size()];
+                double *text_data_d = new double[txt_d.size()];
                 for (size_t i = 0; i < txt_d.size(); i++) {
                     text_data_d[i] = static_cast<double>(txt_d[i]);
                 }
@@ -418,28 +413,79 @@ public:
                 for (size_t i = 0; i < 128; i++) {
                     query_emb[i] = static_cast<double>(emb_flt[i]);
                 }
-                auto indices = sct.recallTopK(query_emb, 10);  // 召回top-10相关文本
-                auto contents = sct.getRecalledTexts(indices);
-                for (auto ct : contents) {
-                    processTextString(&sct_processor, ct);
-                }
-                sct.addTurn(msg.text, text_data_d);
+                std::thread([this, &query_emb, msg, text_data_d](){
+                    auto indices = sct.recallTopK(query_emb, 10); // 召回top-10相关文本
+                    auto contents = sct.getRecalledTexts(indices);
+                    for (auto ct: contents) {
+                        processTextString(&sct_processor, ct);
+                    }
+                    sct.addTurn(msg.text, text_data_d);
+                }).detach();
+                auto input_emb = feature_extractor->extractTextFeature(msg.text);
                 auto matched_logics = logic_injector->findMatchingLogicIds(msg.text);
-                for (const auto& logic_id : matched_logics) {
-                    Logic curr_logic;
-                    logic_tree.fetchByHash(logic_id.first, curr_logic);
-                    char* curr_logic_str = wideCharToMultiByte(curr_logic.content);
-                    processTextString(&logic_processor, std::string(curr_logic_str));
-                    delete[] curr_logic_str;
+                if (matched_logics.size() <= 5) {
+                    std::thread([this, msg, input_emb]() {
+                        try {
+                            rag_loader.autoFetchAndRegisterLogic(logic_injector.get(), &logic_tree, msg.text);
+                            rag_loader.autoFetchAndRegisterLogic(logic_injector.get(), &logic_tree, msg.text, 10,
+                                                                     "HuggingFaceFW/finepdfs", "eng_Latn",
+                                                                     "general");
+                            const std::vector<std::string> all_subsets_maths = {
+                                "Deepseek-Math-RL-7B",
+                                "Deepseek-Math-RL-7B-T=1.1",
+                                "Deepseek-Math-RL-7B-T=1.3",
+                                "InternLM2-Math-Plus-7B",
+                                "InternLM2-Math-Plus-7B-T=1.1",
+                                "InternLM2-Math-Plus-7B-T=1.3",
+                                "InternLM2-Math-Plus-1.8B",
+                                "InternLM2-Math-Plus-1.8B-T=1.1"
+                            };
+                            if (input_emb.cosineSimilarity(feature_extractor->extractTextFeature("Maths")) > 0.6) {
+                                for (const auto& ss: all_subsets_maths) {
+                                    rag_loader.autoFetchAndRegisterLogic(
+                                        logic_injector.get(), &logic_tree, msg.text, 10, "WNJXYK/MATH-Reasoning-Paths",
+                                        ss, "maths");
+                                }
+                            }
+                            if (input_emb.cosineSimilarity(feature_extractor->extractTextFeature("education")) > 0.6) {
+                                rag_loader.autoFetchAndRegisterLogic(logic_injector.get(), &logic_tree, msg.text, 10,
+                                                                     "karpathy/fineweb-edu-100b-shuffle", "",
+                                                                     "education");
+                            }
+                            if (input_emb.cosineSimilarity(feature_extractor->extractTextFeature("coding")) > 0.6) {
+                                rag_loader.autoFetchAndRegisterLogic(logic_injector.get(), &logic_tree, msg.text, 10,
+                                                                     "nick007x/github-code-2025", "above-2-stars",
+                                                                     "coding");
+                            }
+                            if (input_emb.cosineSimilarity(feature_extractor->extractTextFeature("cybersecurity")) > 0.6) {
+                                rag_loader.autoFetchAndRegisterLogic(logic_injector.get(), &logic_tree, msg.text, 10,
+                                                                     "ethanolivertroy/nist-cybersecurity-training", "",
+                                                                     "cybersecurity");
+                            }
+                        } catch (...) {
+                            std::cerr << "WARN: RAG AutoLoading Failed" << std::endl;
+                        }
+                    }).detach();
                 }
-                auto matched_memories = memory_injector->findMatchingLogicIds(msg.text);
-                for (const auto& memory_id : matched_memories) {
-                    MemorySlot curr_memory;
-                    memory_tree.fetchByHash(memory_id.first, curr_memory);
-                    const char* curr_memory_str = reinterpret_cast<const char *>(curr_memory.content.c_str);
-                    processTextString(&memory_processor, std::string(curr_memory_str));
-                    delete[] curr_memory_str;
-                }
+                std::thread([this](){
+                    for (const auto &logic_id: matched_logics) {
+                        Logic curr_logic;
+                        logic_tree.fetchByHash(logic_id.first, curr_logic);
+                        char *curr_logic_str = wideCharToMultiByte(curr_logic.content);
+                        processTextString(&logic_processor, std::string(curr_logic_str));
+                        delete[] curr_logic_str;
+                    }
+                }).detach();
+                std::thread([this](){
+                    auto matched_memories = memory_injector->findMatchingLogicIds(msg.text);
+                    for (const auto &memory_id: matched_memories) {
+                        MemorySlot curr_memory;
+                        memory_tree.fetchByHash(memory_id.first, curr_memory);
+                        const char *curr_memory_str = reinterpret_cast<const char *>(curr_memory.content.c_str);
+                        processTextString(&memory_processor, std::string(curr_memory_str));
+                        delete[] curr_memory_str;
+                    }
+                }).detach();
             }
             return true;
         } catch (...) {
@@ -489,17 +535,17 @@ public:
         }
     }
 
-    ull get_size() const {return GRID_SIZE;}
+    ull get_size() const { return GRID_SIZE; }
 
 private:
     ull GRID_SIZE = 32;
     cudaStream_t streams[4];
     bool *d_active_flags;
     std::thread eventloop;
-    ull NEURON_COUNT = GRID_SIZE * GRID_SIZE * GRID_SIZE;
+    ull NEURON_COUNT = 0; // 将在构造函数中初始化
     ull THREADS_PER_BLOCK = 256;
-    ull NUM_BLOCKS = (NEURON_COUNT + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
-    DeviceQueue<Message, 32> queues[GRID_SIZE][GRID_SIZE][GRID_SIZE]{};
+    ull NUM_BLOCKS = 0; // 将在构造函数中初始化
+    std::vector<std::vector<std::vector<DeviceQueue<Message, 32> > > > queues; // 使用vector代替固定数组
     Neuron *d_neurons{};
     ExternalStorage<KFE_STM_Slot> ext_kfe{};
     SemanticConversationTree sct{};
@@ -538,7 +584,9 @@ private:
         InputMessage cache_msg{};
         Matrix256 matrix_cache_img[16];
         int curr_img_mat = 0;
-        while (!is_running) {}
+        while (!is_running) {
+            std::this_thread::sleep_for(std::chrono::nanoseconds(100));
+        }
         while (is_running) {
             const Matrix256 *next_matrix = processor.getNextBlock();
             if (next_matrix != nullptr) {
@@ -555,7 +603,7 @@ private:
                 next_matrix = nullptr;
             }
             Matrix256 *next_inject_mt = nullptr;
-            for (int i = 0; i < 4 ;i++) {
+            for (int i = 0; i < 4; i++) {
                 if (logic_processor.hasMoreBlocks()) {
                     next_inject_mt = logic_processor.getNextBlock();
                     if (next_inject_mt != nullptr) {
@@ -571,7 +619,7 @@ private:
                     }
                 }
             }
-            for (int i = 0; i < 4 ; i++) {
+            for (int i = 0; i < 4; i++) {
                 if (sct_processor.hasMoreBlocks()) {
                     next_inject_mt = sct_processor.getNextBlock();
                     if (next_inject_mt != nullptr) {
@@ -587,7 +635,7 @@ private:
                     }
                 }
             }
-            for (int i = 0 ; i < 4 ; i++) {
+            for (int i = 0; i < 4; i++) {
                 if (memory_processor.hasMoreBlocks()) {
                     next_inject_mt = memory_processor.getNextBlock();
                     if (next_inject_mt != nullptr) {
@@ -725,10 +773,8 @@ private:
         // 复制基础数据（不复制指针，只复制状态数据）
         path_default = other.path_default;
 
-        // 复制外部存储状态
-        ext_kfe = other.ext_kfe;
-        sct = other.sct;
-        logic_tree = other.logic_tree;
+        // 注意：ExternalStorage对象不进行拷贝，它们管理着独立的资源
+        // ext_kfe, sct, logic_tree, memory_tree 保持不变
 
         // 复制神经元状态（如果需要）
         ull total_neurons = GRID_SIZE * GRID_SIZE * GRID_SIZE;
