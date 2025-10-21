@@ -35,7 +35,8 @@
 2. `semantic_query_engine.cpp` - 语义查询引擎实现文件
 3. `huggingface_streaming.py` - Python脚本用于Hugging Face数据集处理
 4. `demo_rag_enhanced.cpp` - 增强版RAG演示程序
-5. `huggingface_rag_integration.cpp` - Hugging Face集成演示程序
+5. `demo_rag_logic_integration.cpp` - RAG与Logic系统集成演示程序
+6. `huggingface_rag_integration.cpp` - Hugging Face集成演示程序
 
 ## 使用方法
 
@@ -59,6 +60,19 @@ loader.queryAndLoadFromHFDataset("machine learning", "HuggingFaceFW/fineweb", "s
 
 // Logic匹配不足时自动获取数据
 loader.autoFetchDataWhenLogicInsufficient("artificial intelligence", 10, "HuggingFaceFW/fineweb", "sample-10BT");
+```
+
+### Logic系统集成
+```cpp
+// 创建Logic系统组件
+auto logic_storage = std::make_shared<ExternalStorage<LogicDescriptor>>();
+LogicInjector logic_injector(logic_storage.get());
+
+// 将RAG知识注册为Logic
+loader.registerKnowledgeAsLogic(&logic_injector, "rag_knowledge");
+
+// 自动获取并注册Logic
+loader.autoFetchAndRegisterLogic(&logic_injector, "人工智能", 10, "HuggingFaceFW/fineweb", "sample-10BT", "auto_rag");
 ```
 
 ### 语义查询使用
@@ -109,6 +123,16 @@ std::cout << "语义相似度: " << similarity << std::endl;
 - 保持了原有的存储层级管理（L2内存 + L3磁盘）
 - 支持热度管理和自动清理
 - 添加了公共删除方法，支持从存储中物理删除条目
+- 支持不同类型数据的存储（KnowledgeEntry、LogicDescriptor、Logic等）
+
+### Logic系统集成
+- RAG系统与Logic系统采用双重存储架构：
+  - `ExternalStorage<LogicDescriptor>`：存储Logic描述符用于语义匹配
+  - `ExternalStorage<Logic>`：存储实际Logic内容用于执行
+- 保证两个存储系统通过logic_id的slot_id对应关系
+- Logic描述符提供语义特征支持高级匹配
+- Logic内容提供实际数据支持执行操作
+- 两个系统协同工作，各司其职，避免数据冗余
 
 ## 注意事项
 
