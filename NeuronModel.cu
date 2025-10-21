@@ -26,6 +26,7 @@
 #include <Windows.h>
 #include "rag_knowledge_loader.cpp"
 #include "huggingface_rag_integration.cpp"
+#include <queue>
 
 #define ll long long
 #define ull unsigned ll
@@ -47,7 +48,7 @@ public:
      *
      * Allocates memory for neurons and sets up semantic matching components.
      */
-    NeuronModel() : processor(e5), logic_processor(e5), memory_processor(e5), sct_processor(e5) {
+    NeuronModel() : processor(e5), logic_processor(e5), memory_processor(e5), sct_processor(e5), cache_processor(e5) {
         NeuronModel(32);
     }
 
@@ -56,7 +57,8 @@ public:
      *
      * Allocates memory for neurons and sets up semantic matching components.
      */
-    NeuronModel(ull grid_size) : processor(e5), logic_processor(e5), memory_processor(e5), sct_processor(e5) {
+    NeuronModel(ull grid_size) : processor(e5), logic_processor(e5), memory_processor(e5), sct_processor(e5),
+                                 cache_processor(e5) {
         if (grid_size != 0) {
             GRID_SIZE = grid_size;
         }
@@ -88,6 +90,7 @@ public:
         logic_processor = UnifiedInputProcessor(e5);
         memory_processor = UnifiedInputProcessor(e5);
         sct_processor = UnifiedInputProcessor(e5);
+        cache_processor =UnifiedInputProcessor(e5);
         cudaMallocManaged(&d_neurons, GRID_SIZE * GRID_SIZE * GRID_SIZE * sizeof(Neuron));
 
         // 初始化语义匹配系统
@@ -179,7 +182,7 @@ public:
     }
 
     explicit NeuronModel(std::string path) : processor(e5), logic_processor(e5), memory_processor(e5),
-                                             sct_processor(e5) {
+                                             sct_processor(e5), cache_processor(e5) {
         // 使用委派构造函数
         NeuronModel(2);
         path_default = path;
@@ -467,7 +470,7 @@ public:
                         }
                     }).detach();
                 }
-                std::thread([this](){
+                std::thread([this, matched_logics](){
                     for (const auto &logic_id: matched_logics) {
                         Logic curr_logic;
                         logic_tree.fetchByHash(logic_id.first, curr_logic);
@@ -476,7 +479,7 @@ public:
                         delete[] curr_logic_str;
                     }
                 }).detach();
-                std::thread([this](){
+                std::thread([this, msg](){
                     auto matched_memories = memory_injector->findMatchingLogicIds(msg.text);
                     for (const auto &memory_id: matched_memories) {
                         MemorySlot curr_memory;
@@ -558,6 +561,7 @@ private:
     bool is_running = false;
     std::mutex msg_mutex;
     std::vector<std::string> current_logic;
+    std::queue<std::string> cache_queue;
 
     // 语义匹配相关成员
     std::unique_ptr<FeatureExtractor> feature_extractor;
@@ -570,6 +574,7 @@ private:
     UnifiedInputProcessor logic_processor;
     UnifiedInputProcessor memory_processor;
     UnifiedInputProcessor sct_processor;
+    UnifiedInputProcessor cache_processor;
 
     RAGKnowledgeBaseLoader rag_loader;
 
@@ -581,7 +586,25 @@ private:
         Matrix256 current_matrix{};
         Matrix256 curr_logic_mat{};
         Matrix256 prev_logic_mat{};
+        Matrix256 prev_mem_mat{};
+        Matrix256 curr_mem_mat{};
+        Matrix256 prev_find_mem_mat{};
+        Matrix256 curr_find_mem_mat{};
+        Matrix256 prev_find_logic_mat{};
+        Matrix256 curr_find_logic_mat{};
+        Matrix256 prev_cache_mat{};
+        Matrix256 curr_cache_mat{};
+        Matrix256 prev_find_cache_mat{};
+        Matrix256 curr_find_cache_mat{};
+        Matrix256 prev_find_sct_mat{};
+        Matrix256 curr_find_sct_mat{};
         InputMessage cache_msg{};
+        std::string find_cache;
+        std::string find_mem;
+        std::string mem;
+        std::string find_logic;
+        std::string cache;
+        std::string find_sct;
         Matrix256 matrix_cache_img[16];
         int curr_img_mat = 0;
         while (!is_running) {
@@ -651,16 +674,32 @@ private:
                     }
                 }
             }
+            for (int i = 0; i < 4; i++) {
+                if (cache_processor.hasMoreBlocks()) {
+                    next_inject_mt = cache_processor.getNextBlock();
+                    if (next_inject_mt != nullptr) {
+                        NeuronInput cache_inp{};
+                        memcpy(next_block, next_inject_mt->data, sizeof(next_block));
+                        memcpy(cache_inp.array, next_block, sizeof(next_block));
+                        cache_inp.activity = 1.0;
+                        cache_inp.from_coord[0] = 0;
+                        cache_inp.from_coord[1] = 0;
+                        cache_inp.from_coord[2] = 0;
+                        cache_inp.weight = 1.0;
+                        d_neurons[11].inject(cache_inp, i);
+                    }
+                }
+            }
             if (next_inject_mt != nullptr) {
                 delete next_inject_mt;
                 next_inject_mt = nullptr;
             }
             // 将32768个神经元分成4组，每组用一个流
-            int neurons_per_stream = NEURON_COUNT / 4;
+            ull neurons_per_stream = NEURON_COUNT / 4;
 
             for (int i = 0; i < 4; i++) {
-                int offset = i * neurons_per_stream;
-                int count = (i == 3) ? (NEURON_COUNT - offset) : neurons_per_stream;
+                ull offset = i * neurons_per_stream;
+                ull count = (i == 3) ? (NEURON_COUNT - offset) : neurons_per_stream;
 
                 // 异步启动（不等待）
                 all_neurons_kernel<<<NUM_BLOCKS, THREADS_PER_BLOCK, 0, streams[i]>>>(
@@ -673,6 +712,18 @@ private:
             memcpy(current_matrix.data, d_neurons[1].detach(0).array, sizeof(current_matrix.data));
             memcpy(previous_matrix_0.data, current_matrix_0.data, sizeof(previous_matrix_0.data));
             memcpy(current_matrix_0.data, d_neurons[1].detach(1).array, sizeof(current_matrix_0.data));
+            memcpy(prev_cache_mat.data, curr_cache_mat.data, sizeof(prev_cache_mat.data));
+            memcpy(curr_cache_mat.data, d_neurons[5].detach(0).array, sizeof(curr_cache_mat.data));
+            memcpy(prev_find_logic_mat.data, curr_find_logic_mat.data, sizeof(prev_find_logic_mat.data));
+            memcpy(curr_find_logic_mat.data, d_neurons[6].detach(1).array, sizeof(curr_find_logic_mat.data));
+            memcpy(prev_find_mem_mat.data, curr_find_mem_mat.data, sizeof(prev_find_mem_mat.data));
+            memcpy(curr_find_mem_mat.data, d_neurons[7].detach(1).array, sizeof(curr_find_mem_mat.data));
+            memcpy(prev_find_sct_mat.data, curr_find_sct_mat.data, sizeof(prev_find_sct_mat.data));
+            memcpy(curr_find_sct_mat.data, d_neurons[8].detach(0).array, sizeof(curr_find_sct_mat.data));
+            memcpy(prev_mem_mat.data, curr_mem_mat.data, sizeof(prev_mem_mat.data));
+            memcpy(curr_mem_mat.data, d_neurons[9].detach(0).array, sizeof(curr_mem_mat.data));
+            memcpy(prev_find_cache_mat.data, curr_find_cache_mat.data, sizeof(prev_find_cache_mat.data));
+            memcpy(curr_find_cache_mat.data, d_neurons[10].detach(1).array, sizeof(curr_find_cache_mat.data));
             cache_msg = InputMessage{false, false, "", ""};
             if (ImageProcessor::isValidFrame(&current_matrix, &previous_matrix)) {
                 std::string text = matrix_to_string(&current_matrix);
@@ -718,6 +769,142 @@ private:
                 }
 
                 current_logic.clear();
+            }
+            if (ImageProcessor::isValidFrame(&curr_find_logic_mat, &prev_find_logic_mat)) {
+                std::string logic_str = matrix_to_string(&curr_find_logic_mat);
+                find_logic.append(logic_str);
+            }else if (!find_logic.empty()) {
+                auto input_emb = feature_extractor->extractTextFeature(find_logic);
+                auto matched_logics = logic_injector->findMatchingLogicIds(find_logic);
+                if (matched_logics.size() <= 5) {
+                    std::thread([this, find_logic, input_emb]() {
+                        try {
+                            rag_loader.autoFetchAndRegisterLogic(logic_injector.get(), &logic_tree, find_logic);
+                            rag_loader.autoFetchAndRegisterLogic(logic_injector.get(), &logic_tree, find_logic, 10,
+                                                                     "HuggingFaceFW/finepdfs", "eng_Latn",
+                                                                     "general");
+                            const std::vector<std::string> all_subsets_maths = {
+                                "Deepseek-Math-RL-7B",
+                                "Deepseek-Math-RL-7B-T=1.1",
+                                "Deepseek-Math-RL-7B-T=1.3",
+                                "InternLM2-Math-Plus-7B",
+                                "InternLM2-Math-Plus-7B-T=1.1",
+                                "InternLM2-Math-Plus-7B-T=1.3",
+                                "InternLM2-Math-Plus-1.8B",
+                                "InternLM2-Math-Plus-1.8B-T=1.1"
+                            };
+                            if (input_emb.cosineSimilarity(feature_extractor->extractTextFeature("Maths")) > 0.6) {
+                                for (const auto& ss: all_subsets_maths) {
+                                    rag_loader.autoFetchAndRegisterLogic(
+                                        logic_injector.get(), &logic_tree, find_logic, 10, "WNJXYK/MATH-Reasoning-Paths",
+                                        ss, "maths");
+                                }
+                            }
+                            if (input_emb.cosineSimilarity(feature_extractor->extractTextFeature("education")) > 0.6) {
+                                rag_loader.autoFetchAndRegisterLogic(logic_injector.get(), &logic_tree, find_logic, 10,
+                                                                     "karpathy/fineweb-edu-100b-shuffle", "",
+                                                                     "education");
+                            }
+                            if (input_emb.cosineSimilarity(feature_extractor->extractTextFeature("coding")) > 0.6) {
+                                rag_loader.autoFetchAndRegisterLogic(logic_injector.get(), &logic_tree, find_logic, 10,
+                                                                     "nick007x/github-code-2025", "above-2-stars",
+                                                                     "coding");
+                            }
+                            if (input_emb.cosineSimilarity(feature_extractor->extractTextFeature("cybersecurity")) > 0.6) {
+                                rag_loader.autoFetchAndRegisterLogic(logic_injector.get(), &logic_tree, find_logic, 10,
+                                                                     "ethanolivertroy/nist-cybersecurity-training", "",
+                                                                     "cybersecurity");
+                            }
+                        } catch (...) {
+                            std::cerr << "WARN: RAG AutoLoading Failed" << std::endl;
+                        }
+                    }).detach();
+                }
+                std::thread([this, matched_logics](){
+                    for (const auto &logic_id: matched_logics) {
+                        Logic curr_logic;
+                        logic_tree.fetchByHash(logic_id.first, curr_logic);
+                        char *curr_logic_str = wideCharToMultiByte(curr_logic.content);
+                        processTextString(&logic_processor, std::string(curr_logic_str));
+                        delete[] curr_logic_str;
+                    }
+                }).detach();
+                find_logic.clear();
+            }
+            if (ImageProcessor::isValidFrame(&curr_find_mem_mat, &prev_find_mem_mat)) {
+                std::string mem_str = matrix_to_string(&curr_find_mem_mat);
+                find_mem.append(mem_str);
+            } else if (!find_mem.empty()) {
+                auto input_emb = feature_extractor->extractTextFeature(find_mem);
+                auto matched_memories = memory_injector->findMatchingLogicIds(find_mem);
+                for (const auto &memory_id: matched_memories) {
+                    MemorySlot curr_memory;
+                    memory_tree.fetchByHash(memory_id.first, curr_memory);
+                    const char *curr_memory_str = reinterpret_cast<const char *>(curr_memory.content.c_str);
+                    processTextString(&memory_processor, std::string(curr_memory_str));
+                    delete[] curr_memory_str;
+                }
+                find_mem.clear();
+            }
+            if (ImageProcessor::isValidFrame(&curr_mem_mat, &prev_mem_mat)) {
+                std::string mem_str = matrix_to_string(&curr_mem_mat);
+                mem.append(mem_str);
+            } else if (!mem.empty()) {
+                MemorySlot new_memory;
+                new_memory.content = mem;
+                memory_tree.storeWithFeature(new_memory, feature_extractor->extractTextFeature(mem));
+                LogicDescriptor mem_desc;
+                mem_desc.feature = feature_extractor->extractTextFeature(mem);
+                mem_desc.logic_id = sha256_hash<MemorySlot>(new_memory);
+                mem_desc.activation_threshold = 0.5;
+                mem_desc.category = "memory";
+                mem_desc.description = "AutoInjectedMemory";
+                memory_injector->registerLogicWithStorage(mem_desc);
+                mem.clear();
+            }
+            if (ImageProcessor::isValidFrame(&curr_find_sct_mat, &prev_find_sct_mat)) {
+                std::string sct_str = matrix_to_string(&curr_find_sct_mat);
+                find_sct.append(sct_str);
+            } else if (!find_sct.empty()) {
+                double query_emb[128];
+                std::vector<float> emb_flt = feature_extractor->extractTextFeature(find_sct).data;
+                for (size_t i = 0; i < 128; i++) {
+                    query_emb[i] = static_cast<double>(emb_flt[i]);
+                }
+                vector<int> indices = sct.recallTopK(query_emb, 10); // 召回top-10相关文本
+                auto contents = sct.getRecalledTexts(indices);
+                for (const auto& ct: contents) {
+                    processTextString(&sct_processor, ct);
+                }
+                find_sct.clear();
+            }
+            if (ImageProcessor::isValidFrame(&curr_cache_mat, &prev_cache_mat)) {
+                std::string cache_str = matrix_to_string(&curr_cache_mat);
+                cache.append(cache_str);
+            } else if (!cache.empty()) {
+                cache_queue.push(cache);
+                cache.clear();
+                if (cache_queue.size() > 128) {
+                    cache_queue.pop();
+                }
+            }
+            if (ImageProcessor::isValidFrame(&curr_find_cache_mat, &prev_find_cache_mat)) {
+                std::string cache_query_str = matrix_to_string(&curr_find_cache_mat);
+                find_cache.append(cache_query_str);
+            }else if (!find_cache.empty()) {
+                std::queue<std::string> temp_queue = cache_queue;
+                auto query_feature = feature_extractor->extractTextFeature(find_cache);
+                while (!temp_queue.empty()) {
+                    std::string cached_str = temp_queue.front();
+                    temp_queue.pop();
+                    double sim = feature_extractor->calculateSimilarity(
+                        query_feature,
+                        feature_extractor->extractTextFeature(cached_str), "cosine");
+                    if (sim > 0.5) {
+                        processTextString(&cache_processor, cached_str);
+                    }
+                }
+                find_cache.clear();
             }
             std::this_thread::sleep_for(std::chrono::nanoseconds(100));
             // 等待所有流完成
