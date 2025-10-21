@@ -8,6 +8,32 @@
 #include <regex>
 #include <curl/curl.h>
 #include <nlohmann/json.hpp>
+#include <Windows.h>
+
+char* wideCharToMultiByte(wchar_t* pWCStrKey)
+{
+    //第一次调用确认转换后单字节字符串的长度，用于开辟空间
+    int pSize = WideCharToMultiByte(CP_OEMCP, 0, pWCStrKey, wcslen(pWCStrKey), NULL, 0, NULL, NULL);
+    char* pCStrKey = new char[pSize+1];
+    //第二次调用将双字节字符串转换成单字节字符串
+    WideCharToMultiByte(CP_OEMCP, 0, pWCStrKey, wcslen(pWCStrKey), pCStrKey, pSize, NULL, NULL);
+    pCStrKey[pSize] = '\0';
+    return pCStrKey;
+
+    //如果想要转换成string，直接赋值即可
+    //string pKey = pCStrKey;
+}
+
+wchar_t *multiByteToWideChar(const std::string& pKey)
+{
+    const char *pCStrKey = pKey.c_str();
+    //第一次调用返回转换后的字符串长度，用于确认为wchar_t*开辟多大的内存空间
+    int pSize = MultiByteToWideChar(CP_OEMCP, 0, pCStrKey, strlen(pCStrKey) + 1, NULL, 0);
+    wchar_t *pWCStrKey = new wchar_t[pSize];
+    //第二次调用将单字节字符串转换成双字节字符串
+    MultiByteToWideChar(CP_OEMCP, 0, pCStrKey, strlen(pCStrKey) + 1, pWCStrKey, pSize);
+    return pWCStrKey;
+}
 
 using namespace std;
 
@@ -953,6 +979,7 @@ void RAGKnowledgeBaseLoader::setMaxStorageSize(size_t max_size) {
 
 bool RAGKnowledgeBaseLoader::insertToExternalStorage(const std::vector<KnowledgeEntry>& entries) {
     if (!external_storage) {
+        cerr << "❌ 外部存储未初始化" << endl;
         return false;
     }
     
@@ -964,6 +991,129 @@ bool RAGKnowledgeBaseLoader::insertToExternalStorage(const std::vector<Knowledge
     }
     
     return success;
+}
+
+bool RAGKnowledgeBaseLoader::insertToExternalStorageWithSemanticFeatures(const KnowledgeEntry& entry) {
+    if (!external_storage) {
+        cerr << "❌ 外部存储未初始化" << endl;
+        return false;
+    }
+    
+    // 存储到外部存储（带语义特征）
+    uint64_t slot_id = external_storage->storeWithSemanticFeature<KnowledgeEntry>(
+        entry, 
+        1.0,  // initial_heat
+        "/models/e5/e5_large.onnx",      // model_path
+        "/models/e5/vocab.json",         // vocab_path
+        "/models/e5/merges.txt",         // merges_path
+        "/models/e5/special_tokens.json" // special_tokens_path
+    );
+    
+    if (slot_id == 0) {
+        cerr << "❌ 存储到外部存储失败" << endl;
+        return false;
+    }
+    
+    cout << "✅ 成功存储到外部存储 (slot_id: " << slot_id << ") 带语义特征" << endl;
+    return true;
+}
+
+// Logic系统集成方法
+bool RAGKnowledgeBaseLoader::registerKnowledgeAsLogic(LogicInjector* logic_injector, 
+                                                     ExternalStorage<Logic>* logic_tree,
+                                                     const std::string& category) {
+    if (!logic_injector || !logic_tree) {
+        cerr << "❌ Logic注入器或Logic存储未初始化" << endl;
+        return false;
+    }
+    
+    bool success = true;
+    int registered_count = 0;
+    
+    for (const auto& entry : knowledge_base) {
+        // 创建Logic描述符（用于语义匹配）
+        LogicDescriptor logic_desc;
+        logic_desc.logic_id = "rag_" + to_string(hash<string>{}(entry.title + entry.content));
+        logic_desc.description = entry.title + ": " + entry.content; // 使用标题和内容作为描述
+        logic_desc.category = category;
+        logic_desc.activation_threshold = 0.4; // 设置激活阈值
+        
+        // 创建默认的NeuronInput生成器
+        logic_desc.generate_input_callback = LogicDescriptor::createDefaultGenerator(
+            entry.content,  // Logic内容
+            1.0,            // activity
+            1.0,            // weight
+            0, 0, 0         // 坐标
+        );
+        
+        // 注册到Logic系统（语义匹配用的描述符）
+        if (!logic_injector->registerLogicWithStorage(logic_desc)) {
+            cerr << "❌ 注册Logic描述符失败: " << entry.title << endl;
+            success = false;
+        }
+        
+        // 创建实际的Logic对象（用于内容存储）
+        Logic actual_logic;
+        actual_logic.Rcycles = 0;
+        actual_logic.importance = 1.0;
+        
+        // 将内容转换为宽字符并存储
+        string full_content = entry.title + ": " + entry.content;
+        size_t content_len = min(full_content.length(), size_t(1023)); // 保留一个字符给null终止符
+        const char* content_ptr = full_content.c_str();
+        
+        // 转换为宽字符
+        wchar_t* wide_content = multiByteToWideChar(full_content);
+        size_t wide_len = wcslen(wide_content);
+        size_t copy_len = min(wide_len, size_t(1023));
+        
+        // 复制到Logic的content数组
+        wcsncpy(actual_logic.content, wide_content, copy_len);
+        actual_logic.content[copy_len] = L'\0'; // 确保null终止
+        
+        delete[] wide_content;
+        
+        // 存储到logic_tree（实际内容存储）
+        uint64_t slot_id = logic_tree->store(actual_logic, 1.0);
+        if (slot_id == 0) {
+            cerr << "❌ 存储Logic内容失败: " << entry.title << endl;
+            success = false;
+        } else {
+            registered_count++;
+        }
+    }
+    
+    cout << "✅ 成功注册 " << registered_count << " 个Logic到Logic系统" << endl;
+    cout << "   - Logic描述符存储到logic_storage用于语义匹配" << endl;
+    cout << "   - Logic内容存储到logic_tree用于实际执行" << endl;
+    return success;
+}
+
+bool RAGKnowledgeBaseLoader::autoFetchAndRegisterLogic(LogicInjector* logic_injector,
+                                                      ExternalStorage<Logic>* logic_tree,
+                                                      const std::string& query,
+                                                      int min_logics,
+                                                      const std::string& dataset_name,
+                                                      const std::string& subset,
+                                                      const std::string& category) {
+    cout << "🔍 自动获取数据并注册为Logic..." << endl;
+    
+    // 从HuggingFace获取数据
+    bool fetch_success = queryAndLoadFromHFDataset(query, dataset_name, subset, min_logics, category);
+    
+    if (!fetch_success) {
+        cerr << "❌ 获取数据失败" << endl;
+        return false;
+    }
+    
+    // 将获取的知识注册为Logic
+    bool register_success = registerKnowledgeAsLogic(logic_injector, logic_tree, category);
+    
+    if (register_success) {
+        cout << "✅ 成功获取并注册 " << knowledge_base.size() << " 个Logic" << endl;
+    }
+    
+    return register_success;
 }
 
 bool RAGKnowledgeBaseLoader::checkAndCleanupStorage() {

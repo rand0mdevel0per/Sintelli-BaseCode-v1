@@ -16,6 +16,7 @@
 #include "semantic_matcher.h"
 #include "isw.hpp"
 #include "semantic_query_engine.h"
+#include "structs.h"  // 包含NeuronInput定义
 
 // 知识库条目结构
 struct KnowledgeEntry {
@@ -175,8 +176,26 @@ public:
     std::shared_ptr<ExternalStorage<KnowledgeEntry>> getExternalStorage() const;
     bool insertToExternalStorage(const KnowledgeEntry& entry);
     bool insertToExternalStorage(const std::vector<KnowledgeEntry>& entries);
+    bool insertToExternalStorageWithSemanticFeatures(const KnowledgeEntry& entry);
     bool checkAndCleanupStorage();
     void cleanupL3Cache(int num_entries_to_remove = 10);
+    
+    // Logic系统集成方法
+    bool registerKnowledgeAsLogic(LogicInjector* logic_injector, 
+                                 ExternalStorage<Logic>* logic_tree,
+                                 const std::string& category = "rag_knowledge");
+    bool autoFetchAndRegisterLogic(LogicInjector* logic_injector,
+                                  ExternalStorage<Logic>* logic_tree,
+                                  const std::string& query,
+                                  int min_logics = 10,
+                                  const std::string& dataset_name = "HuggingFaceFW/fineweb",
+                                  const std::string& subset = "sample-10BT",
+                                  const std::string& category = "rag_knowledge");
+    
+    // 语义搜索方法
+    std::vector<KnowledgeEntry> semanticSearchKnowledge(const std::string& query, 
+                                                       int top_k = 10,
+                                                       double similarity_threshold = 0.3);
     
 private:
     // 内部辅助方法

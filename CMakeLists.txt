@@ -224,6 +224,28 @@ target_link_libraries(demo_rag_enhanced
     src
 )
 
+# RAG与Logic系统集成演示程序
+add_executable(demo_rag_logic_integration
+    demo_rag_logic_integration.cpp
+)
+
+target_include_directories(demo_rag_logic_integration
+    PRIVATE
+    ${Python3_INCLUDE_DIRS}
+    ${CUTLASS_PATH}/include
+    ${CUTLASS_PATH}/tools/util/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/json
+    ${CMAKE_CURRENT_SOURCE_DIR}/onnx/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/zmq/include
+    ${CUDAToolkit_INCLUDE_DIRS}
+    $<$<BOOL:${LZMA_INCLUDE_DIR}>:${LZMA_INCLUDE_DIR}>
+)
+
+target_link_libraries(demo_rag_logic_integration
+    PRIVATE
+    src
+)
+
 # Hugging Face RAG集成示例
 add_executable(huggingface_rag_integration
     huggingface_rag_integration.cpp
