@@ -19,9 +19,9 @@
 #include "semantic_matcher.h"
 #include "semantic_query_interface.h"
 #include "semantic_matcher.cpp"
-#include "structs.h"  // 包含KFE_STM_Slot定义
-#include "deviceQueue.cpp"  // 包含DeviceQueue模板定义
-#include "KFEManager.h"    // KFE存储管理器
+#include "structs.h"  // Contains KFE_STM_Slot definition
+#include "deviceQueue.cpp"  // Contains DeviceQueue template definition
+#include "KFEManager.h"    // KFE storage manager
 #include "memory_slot.h"
 #include <Windows.h>
 #include "rag_knowledge_loader.cpp"
@@ -31,7 +31,7 @@
 #define ll long long
 #define ull unsigned ll
 
-// NeuronModel类的前向声明
+// Forward declaration of NeuronModel class
 class NeuronModel;
 
 
@@ -48,18 +48,21 @@ class NeuronModel;
 class NeuronModel {
 public:
     /**
-     * @brief Initializes the neuron grid and associated systems.Default initializes to 32x32x32.
+     * @brief Default constructor - initializes the neuron grid with default 32x32x32 size.
      *
      * Allocates memory for neurons and sets up semantic matching components.
+     * Initializes all required subsystems including E5 model, feature extractors, and storage.
      */
     NeuronModel() : processor(e5), logic_processor(e5), memory_processor(e5), sct_processor(e5), cache_processor(e5) {
         NeuronModel(32);
     }
 
     /**
-     * @brief Initializes the neuron grid and associated systems.
+     * @brief Constructor with custom grid size.
      *
      * Allocates memory for neurons and sets up semantic matching components.
+     * Initializes all required subsystems including E5 model, feature extractors, and storage.
+     * @param grid_size Size of the 3D neuron grid (grid_size x grid_size x grid_size)
      */
     NeuronModel(ull grid_size) : processor(e5), logic_processor(e5), memory_processor(e5), sct_processor(e5),
                                  cache_processor(e5) {
@@ -67,11 +70,11 @@ public:
             GRID_SIZE = grid_size;
         }
 
-        // 初始化计算相关常量
+        // Initialize computation-related constants
         NEURON_COUNT = GRID_SIZE * GRID_SIZE * GRID_SIZE;
         NUM_BLOCKS = (NEURON_COUNT + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
 
-        // 初始化队列数组
+        // Initialize queue array
         queues.resize(GRID_SIZE);
         for (ull i = 0; i < GRID_SIZE; i++) {
             queues[i].resize(GRID_SIZE);
@@ -85,7 +88,7 @@ public:
             cudaStreamCreate(&streams[i]);
         }
 
-        // 初始化：全部激活
+        // Initialize: all activated
         cudaMemset(d_active_flags, 1, NEURON_COUNT * sizeof(bool));
         static E5LargeModel e5_instance("/models/e5/e5_large.onnx", "/models/vocab.json", "/models/merges.txt",
                                         "/models/special_tokens.json");
@@ -94,10 +97,10 @@ public:
         logic_processor = UnifiedInputProcessor(e5);
         memory_processor = UnifiedInputProcessor(e5);
         sct_processor = UnifiedInputProcessor(e5);
-        cache_processor =UnifiedInputProcessor(e5);
+        cache_processor = UnifiedInputProcessor(e5);
         cudaMallocManaged(&d_neurons, GRID_SIZE * GRID_SIZE * GRID_SIZE * sizeof(Neuron));
 
-        // 初始化语义匹配系统
+        // Initialize semantic matching system
         feature_extractor = std::make_unique<FeatureExtractor>(
             "/models/e5/e5_large.onnx", "/models/vocab.json",
             "/models/merges.txt", "/models/special_tokens.json");
@@ -105,11 +108,11 @@ public:
             "/models/e5/e5_large.onnx", "/models/vocab.json",
             "/models/merges.txt", "/models/special_tokens.json");
 
-        // 创建用于语义匹配的外部存储
+        // Create external storage for semantic matching
         static ExternalStorage<SemanticMatch> semantic_storage(1024, 100.0, 1.0);
         integrated_matcher = std::make_unique<IntegratedSemanticMatcher>(&semantic_storage);
 
-        // 初始化Logic语义匹配系统
+        // Initialize Logic semantic matching system
         logic_matcher = std::make_unique<LogicSemanticMatcher>(
             "/models/e5/e5_large.onnx", "/models/vocab.json",
             "/models/merges.txt", "/models/special_tokens.json");
@@ -122,12 +125,12 @@ public:
         memory_injector = std::make_unique<LogicInjector>(&memory_logic_storage,
                                                           "/models/e5/e5_large.onnx");
 
-        // 创建KFE存储队列（所有神经元共享）
+        // Create KFE storage queues (shared by all neurons)
         static DeviceQueue<KFE_STM_Slot, 32> kfe_storage_queue;
         static DeviceQueue<std::string, 32> kfe_query_queue;
         static DeviceQueue<KFE_STM_Slot, 32> kfe_result_queue;
 
-        // 启动KFE管理器
+        // Start KFE manager
         static KFEManager kfe_manager(&kfe_storage_queue, &kfe_query_queue, &kfe_result_queue);
 
         for (int idx = 0; idx < GRID_SIZE * GRID_SIZE * GRID_SIZE; idx++) {
@@ -140,37 +143,37 @@ public:
             DeviceQueue<Message, 32> *neighbour_q[6] = {nullptr};
             ull seed = x * 1000000 + y * 1000 + z;
 
-            // +X方向
+            // +X direction
             if (x < GRID_SIZE - 1) {
                 neighbour_q[0] = &queues[x + 1][y][z]; // 指向邻居的-X队列
             } else {
                 neighbour_q[0] = &queues[x - 1][y][z]; // 指向邻居的+X队列
             }
-            // -X方向
+            // -X direction
             if (x > 0) {
                 neighbour_q[1] = &queues[x - 1][y][z]; // 指向邻居的+X队列
             } else {
                 neighbour_q[1] = &queues[x + 1][y][z]; // 指向邻居的-X队列
             }
-            // +Y方向
+            // +Y direction
             if (y < GRID_SIZE - 1) {
                 neighbour_q[2] = &queues[x][y + 1][z];
             } else {
                 neighbour_q[2] = &queues[x][y - 1][z];
             }
-            // -Y方向
+            // -Y direction
             if (y > 0) {
                 neighbour_q[3] = &queues[x][y - 1][z];
             } else {
                 neighbour_q[3] = &queues[x][y + 1][z];
             }
-            // +Z方向
+            // +Z direction
             if (z < GRID_SIZE - 1) {
                 neighbour_q[4] = &queues[x][y][z + 1];
             } else {
                 neighbour_q[4] = &queues[x][y][z - 1];
             }
-            // -Z方向
+            // -Z direction
             if (z > 0) {
                 neighbour_q[5] = &queues[x][y][z - 1];
             } else {
@@ -182,12 +185,12 @@ public:
             // placement new
         }
 
-        std::cout << "分布式神经元系统初始化完成喵!" << std::endl;
+        std::cout << "Distributed neuron system initialization completed!" << std::endl;
     }
 
     explicit NeuronModel(std::string path) : processor(e5), logic_processor(e5), memory_processor(e5),
                                              sct_processor(e5), cache_processor(e5) {
-        // 使用委派构造函数
+        // Use delegating constructor
         NeuronModel(2);
         path_default = path;
         if (!load(path)) {
@@ -195,6 +198,13 @@ public:
         }
     }
 
+    /**
+     * @brief Start the neuron network execution.
+     *
+     * Launches the main processing loop in a separate thread.
+     * Initializes the event loop and starts neural processing.
+     * @return true if successfully started, false otherwise
+     */
     bool run() {
         try {
             is_running = true;
@@ -202,7 +212,7 @@ public:
                 this->loop();
             });
             eventloop.detach();
-            std::cout << "神经元网络运行中喵..." << std::endl;
+            std::cout << "Neuron network is running..." << std::endl;
             std::thread(loop).detach();
             return true;
         } catch (...) {
@@ -213,22 +223,22 @@ public:
     bool save(std::string path = "") {
         if (path.empty()) path = path_default;
         try {
-            // 保存前重置指针
+            // Reset pointers before saving
             resetPointersForSerialization();
 
             std::vector<NeuronData> ndata;
 
-            for (ull i = 0; i < GRID_SIZE ^ 3 ; i++) {
+            for (ull i = 0; i < GRID_SIZE ^ 3; i++) {
                 ndata.push_back(d_neurons[i].save());
             }
 
-            std::pair<NeuronModel,std::vector<NeuronData>> nmdata;
+            std::pair<NeuronModel, std::vector<NeuronData> > nmdata;
             nmdata.first.copyFrom(*this);
             nmdata.second = ndata;
 
-            bool result = Serializer<std::pair<NeuronModel,std::vector<NeuronData>>>::save(nmdata, path);
+            bool result = Serializer<std::pair<NeuronModel, std::vector<NeuronData> > >::save(nmdata, path);
 
-            // 保存后恢复指针连接
+            // Restore pointer connections after saving
             rebuildPointerConnections();
 
             return result;
@@ -240,12 +250,12 @@ public:
     bool load(std::string path = "") {
         if (path.empty()) path = path_default;
         try {
-            std::pair<NeuronModel,std::vector<NeuronData>> nmdata;
-            if (!Serializer<std::pair<NeuronModel,std::vector<NeuronData>>>::load(nmdata, path)) {
+            std::pair<NeuronModel, std::vector<NeuronData> > nmdata;
+            if (!Serializer<std::pair<NeuronModel, std::vector<NeuronData> > >::load(nmdata, path)) {
                 return false;
             }
             this->copyFrom(nmdata.first);
-            for (ull i = 0; i < nmdata.second.size() ; i++) {
+            for (ull i = 0; i < nmdata.second.size(); i++) {
                 d_neurons[i].load(nmdata.second[i]);
             }
             resetPointersForSerialization();
@@ -256,22 +266,26 @@ public:
         }
     }
 
-    // ===== 语义匹配接口 =====
+    // ===== External Storage Integration =====
+    // This section manages integration with external storage systems
+    // Provides methods for data persistence and retrieval from tiered storage
+    // This section provides interfaces for semantic text processing and matching
+    // It integrates with the E5 language model for text embedding and similarity computation
 
-    // 注册文本到语义匹配系统
+    // Register text to semantic matching system
     uint64_t registerTextForMatching(const std::string &text, const std::string &category = "") {
         if (!integrated_matcher) return 0;
         return integrated_matcher->registerAndStore(text, category);
     }
 
-    // 批量注册文本
+    // Batch register texts
     std::vector<uint64_t> batchRegisterTexts(const std::vector<std::string> &texts,
                                              const std::string &category = "") {
         if (!semantic_matcher) return {};
         return semantic_matcher->batchRegisterTexts(texts, category);
     }
 
-    // 语义搜索
+    // Semantic search
     std::vector<SemanticMatch> semanticSearch(const std::string &query_text,
                                               int top_k = 10,
                                               double similarity_threshold = 0.5,
@@ -280,7 +294,7 @@ public:
         return semantic_matcher->findSimilarTexts(query_text, top_k, similarity_threshold, metric);
     }
 
-    // 按类别语义搜索
+    // Semantic search by category
     std::vector<SemanticMatch> semanticSearchByCategory(const std::string &query_text,
                                                         const std::string &category,
                                                         int top_k = 10,
@@ -289,25 +303,25 @@ public:
         return semantic_matcher->findSimilarTextsByCategory(query_text, category, top_k, similarity_threshold);
     }
 
-    // 获取语义匹配统计信息
+    // Get semantic matching statistics
     SemanticMatcher::Stats getSemanticMatchingStats() {
         if (!semantic_matcher) return SemanticMatcher::Stats();
         return semantic_matcher->getStats();
     }
 
-    // 获取最热的语义匹配结果
+    // Get hottest semantic matching results
     std::vector<SemanticMatch> getHottestSemanticMatches(int k = 10) {
         if (!integrated_matcher) return {};
         return integrated_matcher->getHottestMatches(k);
     }
 
-    // 提取文本特征向量
+    // Extract text feature vector
     FeatureVector<float> extractTextFeature(const std::string &text) {
         if (!feature_extractor) return FeatureVector<float>();
         return feature_extractor->extractTextFeature(text);
     }
 
-    // 计算文本相似度
+    // Calculate text similarity
     double calculateTextSimilarity(const std::string &text1, const std::string &text2,
                                    const std::string &metric = "cosine") {
         if (!feature_extractor) return -1.0;
@@ -316,9 +330,11 @@ public:
         return feature_extractor->calculateSimilarity(feature1, feature2, metric);
     }
 
-    // ===== Logic语义匹配接口 =====
+    // ===== Logic Semantic Matching Interface =====
+    // This section handles Logic-based semantic matching and injection
+    // Logic descriptors are registered and matched against input text for neural processing
 
-    // 注册Logic到匹配系统
+    // Register Logic to matching system
     bool registerLogic(const std::string &logic_id,
                        const std::string &description,
                        const std::string &category = "",
@@ -332,7 +348,7 @@ public:
         return logic_injector->registerLogicWithStorage(logic_desc);
     }
 
-    // 根据文本查询匹配的Logic
+    // Find matching Logic based on text query
     std::vector<std::pair<LogicDescriptor, double> > findMatchingLogics(
         const std::string &query_text,
         int top_k = 5,
@@ -342,7 +358,7 @@ public:
         return logic_matcher->findMatchingLogics(query_text, top_k, similarity_threshold, category);
     }
 
-    // 注入匹配的Logic（执行回调并返回NeuronInput列表）
+    // Inject matching Logic (execute callback and return NeuronInput list)
     std::vector<std::pair<std::string, NeuronInput> > injectMatchingLogics(
         const std::string &query_text,
         int top_k = 3,
@@ -351,7 +367,8 @@ public:
         return logic_injector->injectMatchingLogics(query_text, top_k, similarity_threshold);
     }
 
-    // 处理用户输入并自动注入匹配的Logic到指定神经元
+    // Process user input and automatically inject matching Logic to specified neuron
+    // This function finds matching Logic based on input text and injects it into the specified neuron
     bool processInputWithLogicInjection(const std::string &input_text,
                                         int neuron_index = 0,
                                         int port = 0,
@@ -362,44 +379,44 @@ public:
         auto activated_logics = logic_injector->injectMatchingLogics(
             input_text, max_logics, similarity_threshold);
 
-        // 将匹配的Logic注入到神经元
+        // Inject matching Logic into neuron
         for (const auto &[logic_id, neuron_input]: activated_logics) {
             if (neuron_index >= 0 && neuron_index < GRID_SIZE * GRID_SIZE * GRID_SIZE) {
                 d_neurons[neuron_index].inject(neuron_input, port);
-                std::cout << "注入Logic: " << logic_id << " 到神经元 " << neuron_index
-                        << " 端口 " << port << std::endl;
+                std::cout << "Injecting Logic: " << logic_id << " to neuron " << neuron_index
+                        << " port " << port << std::endl;
             }
         }
 
         return !activated_logics.empty();
     }
 
-    // 获取Logic统计信息
+    // Get Logic statistics
     LogicSemanticMatcher::LogicStats getLogicStats() {
         if (!logic_matcher) return {};
         return logic_matcher->getLogicStats();
     }
 
-    // 设置Logic回调函数
+    // Set Logic callback function
     bool setLogicCallback(const std::string &logic_id,
                           std::function<void(const std::string &, NeuronInput &)> callback) {
         if (!logic_matcher) return false;
         return logic_matcher->setLogicCallback(logic_id, callback);
     }
 
-    // 设置简单Logic回调函数（不需要参数的版本）
+    // Set simple Logic callback function (version without parameters)
     bool setSimpleLogicCallback(const std::string &logic_id, std::function<void()> callback) {
         if (!logic_matcher) return false;
         return logic_matcher->setSimpleLogicCallback(logic_id, callback);
     }
 
-    // 移除Logic
+    // Remove Logic
     bool removeLogic(const std::string &logic_id) {
         if (!logic_matcher) return false;
         return logic_matcher->removeLogic(logic_id);
     }
 
-    bool input(const InputMessage& msg, const std::string& role) {
+    bool input(const InputMessage &msg, const std::string &role) {
         try {
             if (msg.has_img) {
                 ImageData img = base64_to_image(msg.base64_image);
@@ -428,10 +445,11 @@ public:
                 for (size_t i = 0; i < 128; i++) {
                     query_emb[i] = static_cast<double>(emb_flt[i]);
                 }
-                std::thread([this, &query_emb, msg, text_data_d, role](){
-                    auto indices = sct.recallTopK(query_emb, 10); // 召回top-10相关文本
+                std::thread([this, &query_emb, msg, text_data_d, role]() {
+                    // Recall top-10 related texts
+                    auto indices = sct.recallTopK(query_emb, 10);
                     auto contents = sct.getRecalledTexts(indices);
-                    for (const auto& ct: contents) {
+                    for (const auto &ct: contents) {
                         processTextString(&sct_processor, ct);
                     }
                     sct.addTurn("<User:" + role + "> " + msg.text, text_data_d);
@@ -443,8 +461,8 @@ public:
                         try {
                             rag_loader.autoFetchAndRegisterLogic(logic_injector.get(), &logic_tree, msg.text);
                             rag_loader.autoFetchAndRegisterLogic(logic_injector.get(), &logic_tree, msg.text, 10,
-                                                                     "HuggingFaceFW/finepdfs", "eng_Latn",
-                                                                     "general");
+                                                                 "HuggingFaceFW/finepdfs", "eng_Latn",
+                                                                 "general");
                             const std::vector<std::string> all_subsets_maths = {
                                 "Deepseek-Math-RL-7B",
                                 "Deepseek-Math-RL-7B-T=1.1",
@@ -456,7 +474,7 @@ public:
                                 "InternLM2-Math-Plus-1.8B-T=1.1"
                             };
                             if (input_emb.cosineSimilarity(feature_extractor->extractTextFeature("Maths")) > 0.6) {
-                                for (const auto& ss: all_subsets_maths) {
+                                for (const auto &ss: all_subsets_maths) {
                                     rag_loader.autoFetchAndRegisterLogic(
                                         logic_injector.get(), &logic_tree, msg.text, 10, "WNJXYK/MATH-Reasoning-Paths",
                                         ss, "maths");
@@ -472,7 +490,8 @@ public:
                                                                      "nick007x/github-code-2025", "above-2-stars",
                                                                      "coding");
                             }
-                            if (input_emb.cosineSimilarity(feature_extractor->extractTextFeature("cybersecurity")) > 0.6) {
+                            if (input_emb.cosineSimilarity(feature_extractor->extractTextFeature("cybersecurity")) >
+                                0.6) {
                                 rag_loader.autoFetchAndRegisterLogic(logic_injector.get(), &logic_tree, msg.text, 10,
                                                                      "ethanolivertroy/nist-cybersecurity-training", "",
                                                                      "cybersecurity");
@@ -482,7 +501,7 @@ public:
                         }
                     }).detach();
                 }
-                std::thread([this, matched_logics](){
+                std::thread([this, matched_logics]() {
                     for (const auto &logic_id: matched_logics) {
                         Logic curr_logic{};
                         logic_tree.fetchByHash(logic_id.first, curr_logic);
@@ -491,7 +510,7 @@ public:
                         delete[] curr_logic_str;
                     }
                 }).detach();
-                std::thread([this, msg](){
+                std::thread([this, msg]() {
                     auto matched_memories = memory_injector->findMatchingLogicIds(msg.text);
                     for (const auto &key: matched_memories | views::keys) {
                         MemorySlot curr_memory;
@@ -521,7 +540,8 @@ public:
     bool stop() {
         try {
             is_running = false;
-            // 等待所有流完成
+            // Wait for all streams to complete
+            // Synchronize all CUDA streams to ensure all GPU operations are finished
             for (int i = 0; i < 4; i++) {
                 cudaStreamSynchronize(streams[i]);
             }
@@ -533,14 +553,15 @@ public:
     }
 
     ~NeuronModel() {
-        std::cout << "正在关闭神经元网络喵..." << std::endl;
+        std::cout << "Shutting down neuron network..." << std::endl;
         this->stop();
         // 等待所有流完成
-        for (const auto & stream : streams) {
+        for (const auto &stream: streams) {
             cudaStreamSynchronize(stream);
         }
         if (d_neurons) {
-            // 调用每个神经元的析构函数
+            // Call destructor for each neuron
+            // Explicitly call destructors for all neurons in the 3D grid before freeing memory
             ull total_neurons = GRID_SIZE * GRID_SIZE * GRID_SIZE;
             for (ull i = 0; i < total_neurons; i++) {
                 d_neurons[i].~Neuron();
@@ -557,9 +578,9 @@ private:
     cudaStream_t streams[4];
     __managed__ bool *d_active_flags;
     std::thread eventloop;
-    ull NEURON_COUNT = 0; // 将在构造函数中初始化
+    ull NEURON_COUNT = 0; // Will be initialized in constructor
     ull THREADS_PER_BLOCK = 256;
-    ull NUM_BLOCKS = 0; // 将在构造函数中初始化
+    ull NUM_BLOCKS = 0; // Will be initialized in constructor
     std::vector<std::vector<std::vector<DeviceQueue<Message, 32> > > > queues; // 使用vector代替固定数组
     Neuron *d_neurons{};
     ExternalStorage<KFE_STM_Slot> ext_kfe{};
@@ -591,6 +612,21 @@ private:
 
     RAGKnowledgeBaseLoader rag_loader;
 
+    /**
+     * @brief Main processing loop for the neuron network.
+     *
+     * This function runs continuously while the network is active.
+     * It processes neuron inputs, manages data flow between components,
+     * handles semantic matching, Logic injection, and output generation.
+     *
+     * The loop performs the following operations:
+     * 1. Processes input blocks from various processors
+     * 2. Executes neuron computations in parallel streams
+     * 3. Manages matrix data flow between neurons
+     * 4. Handles semantic matching and Logic injection
+     * 5. Processes memory and cache operations
+     * 6. Generates output messages
+     */
     __host__ void loop() {
         double next_block[256][256]{};
         Matrix256 previous_matrix_0{};
@@ -707,14 +743,14 @@ private:
                 delete next_inject_mt;
                 next_inject_mt = nullptr;
             }
-            // 将32768个神经元分成4组，每组用一个流
+            // Divide 32768 neurons into 4 groups, each using one stream
             ull neurons_per_stream = NEURON_COUNT / 4;
 
             for (int i = 0; i < 4; i++) {
                 ull offset = i * neurons_per_stream;
                 ull count = (i == 3) ? (NEURON_COUNT - offset) : neurons_per_stream;
 
-                // 异步启动（不等待）
+                // Asynchronous launch (no waiting)
                 all_neurons_kernel<<<NUM_BLOCKS, THREADS_PER_BLOCK, 0, streams[i]>>>(
                     d_neurons + offset,
                     d_active_flags + offset,
@@ -743,12 +779,12 @@ private:
                 cache_msg.has_text = true;
                 cache_msg.text = text;
                 output_cache.append(text);
-            }else if (!output_cache.empty()) {
+            } else if (!output_cache.empty()) {
                 auto output_ch = output_cache;
-                std::thread([this, output_ch](){
+                std::thread([this, output_ch]() {
                     const auto fea = feature_extractor->extractTextFeature(output_ch).data;
                     double txt_emb[128]{};
-                    for (int i = 0; i < 128 ; i++) {
+                    for (int i = 0; i < 128; i++) {
                         txt_emb[i] = static_cast<double>(fea[i]);
                     }
                     sct.addTurn(output_cache, txt_emb);
@@ -761,7 +797,7 @@ private:
                 curr_img_mat++;
                 if (curr_img_mat == 16) {
                     curr_img_mat = 0;
-                    // 转换为指针数组
+                    // Convert to pointer array
                     Matrix256 *frame_ptrs[16];
                     for (int i = 0; i < 16; i++) {
                         frame_ptrs[i] = &matrix_cache_img[i];
@@ -799,7 +835,7 @@ private:
             if (ImageProcessor::isValidFrame(&curr_find_logic_mat, &prev_find_logic_mat)) {
                 std::string logic_str = matrix_to_string(&curr_find_logic_mat);
                 find_logic.append(logic_str);
-            }else if (!find_logic.empty()) {
+            } else if (!find_logic.empty()) {
                 auto input_emb = feature_extractor->extractTextFeature(find_logic);
                 auto matched_logics = logic_injector->findMatchingLogicIds(find_logic);
                 if (matched_logics.size() <= 5) {
@@ -807,8 +843,8 @@ private:
                         try {
                             rag_loader.autoFetchAndRegisterLogic(logic_injector.get(), &logic_tree, find_logic);
                             rag_loader.autoFetchAndRegisterLogic(logic_injector.get(), &logic_tree, find_logic, 10,
-                                                                     "HuggingFaceFW/finepdfs", "eng_Latn",
-                                                                     "general");
+                                                                 "HuggingFaceFW/finepdfs", "eng_Latn",
+                                                                 "general");
                             const std::vector<std::string> all_subsets_maths = {
                                 "Deepseek-Math-RL-7B",
                                 "Deepseek-Math-RL-7B-T=1.1",
@@ -820,9 +856,10 @@ private:
                                 "InternLM2-Math-Plus-1.8B-T=1.1"
                             };
                             if (input_emb.cosineSimilarity(feature_extractor->extractTextFeature("Maths")) > 0.6) {
-                                for (const auto& ss: all_subsets_maths) {
+                                for (const auto &ss: all_subsets_maths) {
                                     rag_loader.autoFetchAndRegisterLogic(
-                                        logic_injector.get(), &logic_tree, find_logic, 10, "WNJXYK/MATH-Reasoning-Paths",
+                                        logic_injector.get(), &logic_tree, find_logic, 10,
+                                        "WNJXYK/MATH-Reasoning-Paths",
                                         ss, "maths");
                                 }
                             }
@@ -836,7 +873,8 @@ private:
                                                                      "nick007x/github-code-2025", "above-2-stars",
                                                                      "coding");
                             }
-                            if (input_emb.cosineSimilarity(feature_extractor->extractTextFeature("cybersecurity")) > 0.6) {
+                            if (input_emb.cosineSimilarity(feature_extractor->extractTextFeature("cybersecurity")) >
+                                0.6) {
                                 rag_loader.autoFetchAndRegisterLogic(logic_injector.get(), &logic_tree, find_logic, 10,
                                                                      "ethanolivertroy/nist-cybersecurity-training", "",
                                                                      "cybersecurity");
@@ -846,7 +884,7 @@ private:
                         }
                     }).detach();
                 }
-                std::thread([this, matched_logics](){
+                std::thread([this, matched_logics]() {
                     for (const auto &logic_id: matched_logics) {
                         Logic curr_logic;
                         logic_tree.fetchByHash(logic_id.first, curr_logic);
@@ -897,9 +935,10 @@ private:
                 for (size_t i = 0; i < 128; i++) {
                     query_emb[i] = static_cast<double>(emb_flt[i]);
                 }
-                vector<int> indices = sct.recallTopK(query_emb, 10); // 召回top-10相关文本
+                // Recall top-10 related texts
+                auto indices = sct.recallTopK(query_emb, 10);
                 auto contents = sct.getRecalledTexts(indices);
-                for (const auto& ct: contents) {
+                for (const auto &ct: contents) {
                     processTextString(&sct_processor, ct);
                 }
                 find_sct.clear();
@@ -917,7 +956,7 @@ private:
             if (ImageProcessor::isValidFrame(&curr_find_cache_mat, &prev_find_cache_mat)) {
                 std::string cache_query_str = matrix_to_string(&curr_find_cache_mat);
                 find_cache.append(cache_query_str);
-            }else if (!find_cache.empty()) {
+            } else if (!find_cache.empty()) {
                 std::queue<std::string> temp_queue = cache_queue;
                 auto query_feature = feature_extractor->extractTextFeature(find_cache);
                 while (!temp_queue.empty()) {
@@ -975,7 +1014,7 @@ private:
     }
 
     void resetPointersForSerialization() const {
-        // 重置所有神经元的指针
+        // Reset pointers for all neurons
         ull total_neurons = GRID_SIZE * GRID_SIZE * GRID_SIZE;
         for (ull i = 0; i < total_neurons; i++) {
             d_neurons[i].resetPointersForSerialization();
@@ -1034,7 +1073,17 @@ private:
         }
     }
 
-    // 验证指针有效性
+    /**
+     * @brief Validate pointer validity.
+     * 
+     * Verifies that all neuron pointers are correctly set up and consistent.
+     * Checks both main queue pointers and neighbor queue pointers for all neurons.
+     * 
+     * This function is essential for ensuring the integrity of the 3D neuron network
+     * and preventing segmentation faults due to invalid pointer access.
+     * 
+     * @return true if all pointers are valid, false otherwise
+     */
     bool validatePointers() {
         ull total_neurons = GRID_SIZE * GRID_SIZE * GRID_SIZE;
 

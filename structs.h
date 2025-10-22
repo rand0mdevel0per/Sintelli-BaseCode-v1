@@ -1,13 +1,14 @@
 /**
  * @file structs.h
- * @brief 神经网络数据结构定义
+ * @brief Core data structures for neural network simulation
  * 
  * @details
- * 定义神经网络模拟中使用的核心数据结构：
- * - 消息类型和结构
- * - KFE短期记忆槽位
- * - 神经元输入输出结构
- * - 连接信息
+ * Defines core data structures used in neural network simulation:
+ * - Message types and structures
+ * - KFE (Knowledge Feature Encoding) short-term memory slots
+ * - Neuron input/output structures
+ * - Connection information
+ * - Feature vectors and compression modes
  *
  * @version 1.0
  * @date 2025-10-03
@@ -25,9 +26,21 @@
 
 /**
  * @struct KFE_STM_Slot
- * @brief 知识特征编码短期记忆槽位
+ * @brief Knowledge Feature Encoding Short-Term Memory Slot
  * 
  * @details
+ * Stores compressed knowledge fragments for rapid access during inference.
+ * Each slot contains utility metrics, importance scores, and memory content.
+ * KFE provides contextual knowledge for enhanced reasoning and decision making.
+ * 
+ * Fields:
+ * - Ulocal: Local utility of the knowledge fragment
+ * - Rcycles: Reference cycle count for temporal tracking
+ * - Icore: Core importance score
+ * - V: Volatility metric
+ * - Vmem: Memory content matrix (256x256)
+ * - conv16: Compressed 16x16 representation
+ */
  * 存储神经元的短期知识片段，包含：
  * - 本地效用计数
  * - 最后访问周期
@@ -101,32 +114,45 @@ struct ExtKFE_Slot {
 
 /**
  * @enum MessageType
- * @brief 消息类型枚举
+ * @brief Message type enumeration
  * 
- * @details
- * 定义神经元间通信的消息类型：
- * - NEURON_DATA: 神经元数据传递
- * - FIND_NEURON: 寻找连接目标
- * - REPLY_NEURON_FIND: 回复连接请求
+ * Defines different types of messages used in neuron communication:
+ * - NEURON_DATA: Neural data transmission between connected neurons
+ * - FIND_NEURON: Connection discovery messages for network topology
+ * - REPLY_NEURON_FIND: Responses to connection discovery requests
  */
 enum MessageType {
-    NEURON_DATA, // 神经元数据传递
-    FIND_NEURON, // 寻找连接目标
-    REPLY_NEURON_FIND, // 回复连接请求
+    NEURON_DATA,        // Neuron data message
+    FIND_NEURON,        // Find neuron connection
+    REPLY_NEURON_FIND   // Reply to neuron connection request
 };
 
 /**
  * @struct Message
- * @brief 神经元间通信的消息结构
+ * @brief Core message structure for neuron communication
  * 
  * @details
- * 包含完整的消息信息：
- * - 3D坐标信息（发送者、接收者、代理）
- * - 消息类型和活跃度
- * - 联合体存储不同压缩模式的数据
- * - 压缩模式标识
+ * Contains essential message information:
+ * - Type, coordinates, activity level, weight
+ * - Adaptive message content (Full/Convolutional/Residual)
+ * - Compression mode for efficient transmission
  * 
- * @note 使用联合体节省内存，支持多种压缩格式
+ * Features:
+ * - Adaptive compression based on content importance
+ * - Multi-dimensional coordinate system (3D neural grid)
+ * - Weighted message propagation
+ * - Support for different message types (data/find/reply)
+ * 
+ * Fields:
+ * - type: Message type (NEURON_DATA/FIND_NEURON/REPLY_NEURON_FIND)
+ * - from_coord: Sender coordinates (3D grid position)
+ * - to_coord: Receiver coordinates (3D grid position)
+ * - last_proxy_coord: Last proxy coordinates for routing
+ * - activity: Message activity level
+ * - weight: Message propagation weight
+ * - remains: Remaining hops for FIND_NEURON messages
+ * - adaptive_msg: Union of different message formats
+ * - compression_mode: Compression strategy (FULL/RESIDUAL/CONV_ONLY)
  */
 struct Message {
     ll last_proxy_coord[3]; // 最后一个代理坐标
@@ -160,15 +186,21 @@ struct NeuronUpdate {
 
 /**
  * @struct NeuronInput
- * @brief 神经元输入结构
+ * @brief Neuron input data structure
  * 
  * @details
- * 神经元接收的输入数据：
- * - 256×256数据矩阵
- * - 活跃度和权重
- * - 来源坐标
+ * Input data received by neurons containing:
+ * - 256×256 data matrix for high-resolution information
+ * - Activity level and weight for signal strength
+ * - Source coordinates for spatial context
  * 
- * @note 使用固定大小数组确保内存对齐
+ * @note Uses fixed-size arrays to ensure memory alignment and GPU efficiency
+ * 
+ * This structure represents the core input format for neural processing:
+ * - array[256][256]: High-dimensional input data matrix
+ * - activity: Signal strength indicator (0.0-1.0)
+ * - weight: Importance weight for the input
+ * - from_coord[3]: 3D spatial coordinates of the sender
  */
 struct NeuronInput {
     double array[256][256]; // 输入数据

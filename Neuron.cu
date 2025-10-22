@@ -51,25 +51,27 @@
 class Neuron {
 public:
     /**
-     * @brief 删除默认构造函数，神经元必须显式初始化
-     * @note 神经元需要完整的初始化参数，不能默认构造
+     * @brief Delete default constructor - neurons must be explicitly initialized.
+     * @note Neurons require complete initialization parameters and cannot be default constructed.
+     * This ensures proper setup of all neuron components and connections.
      */
     Neuron() = delete;
 
     /**
-     * @brief 神经元构造函数
+     * @brief Neuron constructor.
      * 
-     * @param[in] queues 6个方向的设备队列指针数组，用于消息传递
-     * @param[in] coord 3D坐标数组，定义神经元在空间中的位置
-     * @param[in] seed 随机数种子，用于初始化随机状态
-     * @param[in] queue_ptr 主设备队列指针，用于接收消息
-     * @param[in] find_kfe KFE查找函数指针
-     * @param[in] storage_kfe KFE存储函数指针  
-     * @param[in] exp_kfe KFE导出函数指针
+     * @param[in] queues Array of 6 device queue pointers for message passing in 6 directions
+     * @param[in] coord 3D coordinate array defining neuron position in space
+     * @param[in] seed Random number seed for initializing random state
+     * @param[in] queue_ptr Main device queue pointer for receiving messages
+     * @param[in] storage_queue KFE storage queue pointer
+     * @param[in] query_queue KFE query queue pointer
+     * @param[in] result_queue KFE result queue pointer
      * 
-     * @throws 无显式异常抛出，但依赖CUDA运行时错误检查
+     * @throws No explicit exceptions thrown, but relies on CUDA runtime error checking
      * 
-     * @note 构造函数会初始化所有矩阵、队列和状态变量到默认值
+     * @note Constructor initializes all matrices, queues, and state variables to default values
+     * Sets up connections, random state, and prepares neuron for operation
      */
     Neuron(DeviceQueue<Message, 32> *queues[6], ll coord[3], ull seed, DeviceQueue<Message, 32> *queue_ptr,
         DeviceQueue<KFE_STM_Slot, 32>* storage_queue, DeviceQueue<std::string, 32>* query_queue, DeviceQueue<KFE_STM_Slot, 32>* result_queue) {
@@ -248,10 +250,13 @@ public:
         return false;
     }
     
-    // ===== 单步执行接口 =====
+    // ===== Single Step Execution Interface =====
     /**
      * @enum StepMode
-     * @brief 神经元单步执行的阶段枚举
+     * @brief Neuron single step execution phase enumeration
+     * 
+     * Defines the sequential phases of neuron computation in a single step.
+     * Each phase represents a distinct computational task in the neuron lifecycle.
      */
     enum StepMode {
         STEP_MESSAGE_PROCESSING,    // 消息处理阶段
@@ -262,19 +267,20 @@ public:
     };
     
     /**
-     * @brief 执行神经元单步计算
+     * @brief Execute single step neuron computation.
      * 
      * @details
-     * 按照以下阶段顺序执行：
-     * 1. 消息处理
-     * 2. 输入处理  
-     * 3. 推理计算
-     * 4. 输出广播
-     * 5. 维护任务
+     * Executes neuron computation in the following sequential phases:
+     * 1. Message Processing - Handle incoming messages from other neurons
+     * 2. Input Processing - Process data from input ports
+     * 3. Inference - Perform GEMM/DRC inference calculations
+     * 4. Output Broadcast - Send results to connected neurons
+     * 5. Maintenance - Update internal state and perform housekeeping
      * 
-     * @return StepMode 返回当前执行的阶段
+     * @return StepMode Current execution phase
      * 
-     * @note 在CUDA设备端执行，确保所有操作都是线程安全的
+     * @note Executed on CUDA device, ensuring all operations are thread-safe
+     * This function is the core computational unit of each neuron.
      */
     __device__ StepMode step() {
         StepMode current_step = STEP_MESSAGE_PROCESSING;
@@ -357,16 +363,21 @@ public:
     }
     
     /**
-     * @brief 判断是否需要执行完整的GEMM推理
+     * @brief Determine whether to execute full GEMM inference.
      * 
      * @details
-     * 根据以下条件判断是否触发GEMM推理：
-     * 1. 周期心跳（每16步）
-     * 2. 外部输入变化大（预测误差高）
-     * 3. 内部核心脆弱性高
-     * 4. 短期记忆聚合效用高
+     * Decides whether to trigger full GEMM inference based on multiple factors:
+     * 1. Periodic heartbeat (every 16 steps) - Regular full computation
+     * 2. High external input variation (high prediction error) - Significant changes require full processing
+     * 3. High internal core vulnerability - Instability requires robust computation
+     * 4. High short-term memory aggregate utility - Contextual knowledge importance
      * 
-     * @return bool true表示需要执行GEMM推理，false表示执行微修正
+     * @return bool true if full GEMM inference is needed, false for lightweight micro-correction
+     * 
+     * This gating mechanism optimizes computational efficiency by:
+     * - Using lightweight micro-corrections for stable states
+     * - Triggering full GEMM computations when significant changes occur
+     * - Balancing accuracy with performance through adaptive triggering
      */
     __device__ bool shouldTriggerGEMM() {
         // 周期心跳
@@ -491,29 +502,45 @@ private:
     __managed__ std::vector<ExtKFE_Slot> ext_kfe_slots;
     __managed__ GPUMutex ext_kfe_mutex,kfe_mutex;
 
-    // ===== KFE短期记忆 =====
+    // ===== KFE Short-Term Memory =====
+    // Local KFE (Knowledge Feature Encoding) short-term memory slots
+    // Each neuron maintains 16 local KFE slots for contextual knowledge
+    // These slots store compressed knowledge fragments for rapid access
     __managed__ KFE_STM_Slot kfe_local[16]{};
 
     // ===== 消息队列系统 =====
     __managed__ DeviceQueue<Message, 32> *queue{};
     __managed__ DeviceQueue<Message, 32> *neighbour_queues[6]{}; // 6个方向的邻居
 
-    // ===== 端口系统(4个逻辑端口) =====
+    // ===== Port System (4 Logical Ports) =====
+    // Each neuron has 4 logical ports for input/output operations
+    // This allows for multi-channel communication between neurons
     __managed__ DeviceQueue<NeuronInput, 1024> port_in[4]{};
     __managed__ DeviceQueue<NeuronInput, 1024> port_out[4]{};
     __managed__ ll port_counts[4]{}; // 每个端口的连接数
 
-    // ===== 连接信息 =====
+    // ===== Connection Information =====
+    // Stores connection details for input and output connections
+    // Each neuron can have up to 2048 input and 2048 output connections
     __managed__ ConnectionInfo input_conns[2048]{};
     __managed__ ConnectionInfo output_conns[2048]{};
     __managed__ int input_conn_count;
     __managed__ int output_conn_count;
 
-    // ===== 端口变换矩阵 =====
+    // ===== Port Transformation Matrices =====
+    // Input/output transformation matrices for each of the 4 ports
+    // Used for feature transformation and mapping between ports
     __managed__ double input_multiplex_array[256][256][4]{}; // 输入端口变换
     __managed__ double output_multiplex_array[256][256][4]{}; // 输出端口变换
 
-    // ===== GEMM/DRC推理状态 =====
+    // ===== GEMM/DRC Inference State =====
+    // Core matrices for GEMM (General Matrix Multiply) and DRC (Dynamic Recalibration Correction) inference
+    // P_Matrix: Current state matrix
+    // P_stable: Stable prediction baseline
+    // W_predict: Autoregressive weights
+    // M_KFE: KFE knowledge context
+    // Deviation: Prediction error
+    // PS_aggregate: Neighbor consensus
     __managed__ double P_Matrix[256][256]{}; // 意图矩阵(当前状态)
     __managed__ double P_stable[256][256]{}; // 稳定预测(认知基线)
     __managed__ double W_predict[256][256]{}; // 自回归权重
@@ -521,7 +548,13 @@ private:
     __managed__ double Deviation[256][256]{}; // 预测误差
     __managed__ double PS_aggregate[256][256]{}; // 邻居共识
 
-    // ===== 门控和DRC历史 =====
+    // ===== Gating and DRC History =====
+    // Variables for controlling inference execution and maintaining history
+    // cycle_counter: Tracks neuron execution cycles
+    // core_vulnerability: Measures internal instability
+    // STM_aggregate_utility: Short-term memory aggregate utility
+    // P_history: Stores recent 5 rounds of state matrices
+    // history_index: Current position in history buffer
     __managed__ int cycle_counter;
     __managed__ double core_vulnerability;
     __managed__ double STM_aggregate_utility;
@@ -836,19 +869,20 @@ private:
         }
     }
 
-    // ===== 消息处理 =====
+    // ===== Message Processing =====
     /**
-     * @brief 处理接收到的消息
+     * @brief Process received messages.
      * 
-     * @param[in] msg 待处理的消息
+     * @param[in] msg Message to be processed
      * 
      * @details
-     * 根据消息类型执行不同操作：
-     * - NEURON_DATA: 数据消息的路由或接收
-     * - FIND_NEURON: 连接请求的转发或回复
-     * - REPLY_NEURON_FIND: 连接回复的处理
+     * Performs different operations based on message type:
+     * - NEURON_DATA: Route or receive data messages
+     * - FIND_NEURON: Forward or reply to connection requests
+     * - REPLY_NEURON_FIND: Process connection replies
      * 
-     * @note 消息处理是神经元通信的核心功能
+     * @note Message processing is the core communication functionality of neurons
+     * Handles all inter-neuron communication and network topology discovery.
      */
     __device__ void processMessage(const Message &msg) {
         if (msg.type == NEURON_DATA) {
@@ -987,20 +1021,21 @@ private:
         }
     }
 
-    // ===== 核心推理更新 =====
+    // ===== Core Inference Update =====
     /**
-     * @brief 执行核心推理更新计算
+     * @brief Execute core inference update computation.
      * 
-     * @param[in] port 输入端口索引
+     * @param[in] port Input port index
      * 
      * @details
-     * 执行完整的推理计算流程：
-     * 1. 聚合所有端口的邻居输入
-     * 2. 计算预测误差和KFE注意力
-     * 3. 门控判断执行GEMM或微修正
-     * 4. 广播输出并更新卷积核
+     * Executes the complete inference computation flow:
+     * 1. Aggregate neighbor inputs from all ports
+     * 2. Compute prediction error and KFE attention
+     * 3. Gating decision to execute GEMM or micro-correction
+     * 4. Broadcast output and update convolution kernels
      * 
-     * @note 这是神经元计算的核心函数
+     * @note This is the core computational function of neurons
+     * Integrates inputs, performs reasoning, and generates outputs.
      */
     __device__ void processUpdate(int port) {
         if (port_in[port].empty()) return;
@@ -1111,18 +1146,25 @@ private:
     }
 
     /**
-     * @brief 计算KFE短期记忆的注意力权重
+     * @brief Compute attention weights for KFE short-term memory.
      * 
-     * @return double STM聚合效用值
+     * @return double STM aggregate utility value
      * 
      * @details
-     * 计算当前预测误差与KFE记忆片段的相关性：
-     * - 遍历16个KFE槽位
-     * - 计算点积和Sigmoid激活
-     * - 更新KFE统计信息
-     * - 支持外部KFE查询
+     * Computes correlation between current prediction error and KFE memory fragments:
+     * - Iterates through 16 local KFE slots
+     * - Computes dot product and applies Sigmoid activation function
+     * - Updates KFE statistics for adaptive learning
+     * - Supports external KFE queries when local memory is insufficient
      * 
-     * @note 注意力机制决定知识片段对当前推理的影响
+     * @note Attention mechanism determines influence of knowledge fragments on current reasoning
+     * KFE (Knowledge Feature Encoding) provides contextual knowledge for enhanced inference.
+     * 
+     * The function performs the following operations:
+     * 1. Calculates attention weights for each local KFE slot
+     * 2. Updates utility, importance, and volatility metrics
+     * 3. Queries external KFE storage when local capacity is low
+     * 4. Aggregates attention-weighted knowledge into M_KFE matrix
      */
     __device__ double computeKFEAttention() {
         double utility = 0.0;
@@ -1217,16 +1259,26 @@ private:
     }
 
     /**
-     * @brief 执行GEMM推理和DRC迭代修正
+     * @brief Execute GEMM inference and DRC iterative correction.
      * 
      * @details
-     * 完整的推理计算流程：
-     * 1. GEMM核心推理（P_Matrix × W_predict）
-     * 2. 计算固定目标T_fixed
-     * 3. 16轮DRC迭代修正
-     * 4. 同步状态和更新核心脆弱性
+     * Complete inference computation workflow:
+     * 1. GEMM core inference (P_Matrix × W_predict)
+     * 2. Compute fixed target T_fixed
+     * 3. 16 rounds of DRC iterative correction
+     * 4. Synchronize state and update core vulnerability
      * 
-     * @note 这是计算最密集的部分，使用GELU激活和动量修正
+     * @note This is the most computationally intensive part, using GELU activation and momentum correction
+     * 
+     * GEMM (General Matrix Multiply) performs core neural computations.
+     * DRC (Dynamic Recalibration Correction) iteratively refines results for accuracy.
+     * 
+     * The function performs:
+     * - Matrix multiplication with learned weights
+     * - Knowledge context integration from KFE
+     * - GELU activation for non-linear transformation
+     * - Iterative refinement with attention modulation
+     * - Historical momentum for stable learning
      */
     __device__ void executeGEMMAndDRC() {
         // === 步骤1: GEMM核心推理 ===
