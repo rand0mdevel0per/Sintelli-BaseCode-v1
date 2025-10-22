@@ -115,12 +115,17 @@ static PyObject* py_input(PyObject* self, PyObject* args) {
             msg.base64_image = std::string(img_base64);
         }
 
+        const char* role;
+        if (!PyArg_ParseTuple(args, "s", &role)) {
+            role = "user";
+        }
+
         if (!g_model || !g_model_running) {
             PyErr_SetString(PyExc_RuntimeError, "Model not running");
             return NULL;
         }
 
-        bool success = g_model->input(msg);
+        bool success = g_model->input(msg, std::string(role));
 
         return PyBool_FromLong(success);
 
@@ -203,14 +208,14 @@ static PyObject* py_destroy_model(PyObject* self, PyObject* args) {
 // ========== 模块定义 ==========
 
 static PyMethodDef NeuronMethods[] = {
-    {"create_model32", py_create_model32, METH_VARARGS,
+    {"create_model", py_create_model, METH_VARARGS,
      "Create neuron model\n\nArgs:\n    grid_size (int): Grid size (default 32)"},
 
     {"start_model", py_start_model, METH_VARARGS,
      "Start the model"},
 
     {"input", py_input, METH_VARARGS,
-     "Input content to model\n\nArgs:\n    text (str): Input text [optional] , image (str): Input image(base64)[optional]"},
+     "Input content to model\n\nArgs:\n    text (str): Input text [optional] , image (str): Input image(base64)[optional] , role (str) : User role[optional]"},
 
     {"get_next_output", py_get_next_output, METH_VARARGS,
      "Get next output (blocking with timeout)\n\nArgs:\n    timeout (float): Timeout in seconds (default 1.0)\n\nReturns:\n    str or None"},

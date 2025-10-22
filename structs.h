@@ -193,4 +193,29 @@ struct ConnectionInfo {
     bool inout; // true=输入, false=输出
 };
 
+struct NeuronData {
+    // ===== 端口系统(4个逻辑端口) =====
+    std::queue<NeuronInput> port_in[4]{};
+    std::queue<NeuronInput> port_out[4]{};
+    ll port_counts[4]{}; // 每个端口的连接数
+
+    // ===== 连接信息 =====
+    ConnectionInfo input_conns[2048]{};
+    ConnectionInfo output_conns[2048]{};
+    int input_conn_count{};
+    int output_conn_count{};
+
+    // ===== 端口变换矩阵 =====
+    double input_multiplex_array[256][256][4]{}; // 输入端口变换
+    double output_multiplex_array[256][256][4]{}; // 输出端口变换
+
+    // ===== GEMM/DRC推理状态 =====
+    double P_Matrix[256][256]{}; // 意图矩阵(当前状态)
+    double P_stable[256][256]{}; // 稳定预测(认知基线)
+    double W_predict[256][256]{}; // 自回归权重
+    double M_KFE[256][256]{}; // KFE知识上下文
+    double Deviation[256][256]{}; // 预测误差
+    double PS_aggregate[256][256]{}; // 邻居共识
+};
+
 #endif //SRC_STRUCTS_H

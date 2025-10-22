@@ -26,6 +26,7 @@
 #include "isw.hpp"
 #include "conv16_res_msg.cuh"
 #include <cmath>    // for sqrt, exp, etc
+#include <sm_20_intrinsics.h>
 #include <vector>
 #include "hasher.h"
 #include "structs.h"
@@ -120,6 +121,72 @@ public:
 
         // 初始化矩阵
         initializeMatrices();
+    }
+
+    __host__ NeuronData save() {
+        NeuronData data{};
+        while (!port_in->empty()) {
+            NeuronInput cache{};
+            port_in->pop(cache);
+            data.port_in->push(cache);
+        }
+        while (!port_out->empty()) {
+            NeuronInput cache{};
+            port_in->pop(cache);
+            data.port_in->push(cache);
+        }
+        memcpy(data.port_counts, port_counts, sizeof(port_counts));
+
+        memcpy(data.input_conns, input_conns, sizeof(input_conns));
+        memcpy(data.output_conns, output_conns, sizeof(output_conns));
+        data.input_conn_count = input_conn_count;
+        data.output_conn_count = output_conn_count;
+
+        memcpy(data.input_multiplex_array, input_multiplex_array, sizeof(input_multiplex_array));
+        memcpy(data.output_multiplex_array, output_multiplex_array, sizeof(output_multiplex_array));
+
+        memcpy(data.P_Matrix, P_Matrix, sizeof(P_Matrix));
+        memcpy(data.P_stable, P_stable, sizeof(P_stable));
+        memcpy(data.W_predict, W_predict, sizeof(W_predict));
+        memcpy(data.M_KFE, M_KFE, sizeof(M_KFE));
+        memcpy(data.Deviation, Deviation, sizeof(Deviation));
+        memcpy(data.PS_aggregate, PS_aggregate, sizeof(PS_aggregate));
+
+        return data;
+    }
+
+    __host__ bool load(NeuronData data) {
+        try {
+            while (!data.port_in->empty()) {
+                NeuronInput cache = data.port_in->front();
+                data.port_in->pop();
+                port_in->push(cache);
+            }
+            while (!data.port_out->empty()) {
+                NeuronInput cache = data.port_out->front();
+                data.port_out->pop();
+                port_out->push(cache);
+            }
+            memcpy(port_counts, data.port_counts, sizeof(port_counts));
+
+            memcpy(input_conns, data.input_conns, sizeof(input_conns));
+            memcpy(output_conns, data.output_conns, sizeof(output_conns));
+            input_conn_count = data.input_conn_count;
+            output_conn_count = data.output_conn_count;
+
+            memcpy(input_multiplex_array, data.input_multiplex_array, sizeof(input_multiplex_array));
+            memcpy(output_multiplex_array, data.output_multiplex_array, sizeof(output_multiplex_array));
+
+            memcpy(P_Matrix, data.P_Matrix, sizeof(P_Matrix));
+            memcpy(P_stable, data.P_stable, sizeof(P_stable));
+            memcpy(W_predict, data.W_predict, sizeof(W_predict));
+            memcpy(M_KFE, data.M_KFE, sizeof(M_KFE));
+            memcpy(Deviation, data.Deviation, sizeof(Deviation));
+            memcpy(PS_aggregate, data.PS_aggregate, sizeof(PS_aggregate));
+        } catch (...) {
+            return false;
+        }
+        return true;
     }
 
     /**
@@ -404,15 +471,15 @@ public:
 
 private:
     // ===== 随机数和基础状态 =====
-    curandStatePhilox4_32_10_t rand_state{};
-    double activity;
+    __managed__ curandStatePhilox4_32_10_t rand_state{};
+    __managed__ double activity;
     __managed__ ll local_coord[3]{0, 0, 0};
     // KFE外部存储队列（通过消息队列与主机通信）
     __managed__ DeviceQueue<KFE_STM_Slot, 32>* kfe_storage_queue;  // 存储请求队列
     __managed__ DeviceQueue<std::string, 32>* kfe_query_queue;     // 查询请求队列
     __managed__ DeviceQueue<KFE_STM_Slot, 32>* kfe_result_queue;   // 查询结果队列
-    std::vector<ExtKFE_Slot> ext_kfe_slots;
-    GPUMutex ext_kfe_mutex,kfe_mutex;
+    __managed__ std::vector<ExtKFE_Slot> ext_kfe_slots;
+    __managed__ GPUMutex ext_kfe_mutex,kfe_mutex;
 
     // ===== KFE短期记忆 =====
     __managed__ KFE_STM_Slot kfe_local[16]{};
@@ -427,10 +494,10 @@ private:
     __managed__ ll port_counts[4]{}; // 每个端口的连接数
 
     // ===== 连接信息 =====
-    ConnectionInfo input_conns[2048]{};
-    ConnectionInfo output_conns[2048]{};
-    int input_conn_count;
-    int output_conn_count;
+    __managed__ ConnectionInfo input_conns[2048]{};
+    __managed__ ConnectionInfo output_conns[2048]{};
+    __managed__ int input_conn_count;
+    __managed__ int output_conn_count;
 
     // ===== 端口变换矩阵 =====
     __managed__ double input_multiplex_array[256][256][4]{}; // 输入端口变换
@@ -445,18 +512,20 @@ private:
     __managed__ double PS_aggregate[256][256]{}; // 邻居共识
 
     // ===== 门控和DRC历史 =====
-    int cycle_counter;
-    double core_vulnerability;
-    double STM_aggregate_utility;
+    __managed__ int cycle_counter;
+    __managed__ double core_vulnerability;
+    __managed__ double STM_aggregate_utility;
     __managed__ double P_history[5][256][256]{}; // 最近5轮历史
-    int history_index;
-    MessageEncoder encoder;
-    MessageDecoder decoder;
-    double importance;
+    __managed__ int history_index;
+    __managed__ MessageEncoder encoder{};
+    __managed__ MessageDecoder decoder{};
+    __managed__ double importance;
 
     // ===== XOR相关(备用) =====
+    /*  __DEPRECATED__
     __managed__ bool core_xor_array[2048][2048]{};
     __managed__ double cor_xor_clip_array[2048][2048]{};
+    */
 
     // ===== 添加卷积相关成员 =====
     __managed__ ConvKernel input_conv_kernels[4][8]{}; // 每个端口8个卷积核
@@ -1103,8 +1172,13 @@ private:
             // 通过队列查询外部KFE
             if (kfe_query_queue && kfe_result_queue) {
                 kfe_query_queue->push(ext_kfe_slots[max_index].hash);
-                // 异步查询，可能不会立即得到结果
-                // 这里简化处理，直接使用空槽位
+                // 尝试获取查询结果
+                if (kfe_result_queue->pop(ext_kfe_pulled)) {
+                    // 成功获取到外部KFE槽位
+                } else {
+                    // 如果获取失败，使用默认值
+                    ext_kfe_pulled = {};
+                }
             }
             // KFE块与Deviation的点积(相关性)
             double dot_product = 0.0;
@@ -1392,7 +1466,8 @@ private:
 
             //Save important Slot to persistence slot and clear local slot
             if (kfe_local[k].V == 0.0) {
-                if (storage_kfe && storage_kfe(kfe_local[k])) {
+                if (kfe_storage_queue) {
+                    kfe_storage_queue->push(kfe_local[k]);
                     GPUMutexGuard lock_ext(&ext_kfe_mutex);
                     ExtKFE_Slot cache_ext;
                     memcpy(cache_ext.conv16, kfe_local[k].conv16, sizeof(kfe_local[k].conv16));
