@@ -410,13 +410,13 @@ private:
     std::unordered_map<std::string, std::vector<uint64_t>> feature_index;
 
     // 配置参数
-    size_t l2_max_size;
-    double promote_threshold;
-    double demote_threshold;
+    size_t l2_max_size{};
+    double promote_threshold{};
+    double demote_threshold{};
 
     // 统计信息
-    uint32_t current_time;
-    uint64_t next_slot_id;
+    uint32_t current_time{};
+    uint64_t next_slot_id{};
 
     // 线程安全
     mutable std::mutex storage_mutex;
@@ -441,9 +441,23 @@ public:
         heat_index = std::make_unique<vEB_Tree<DataDescriptor>>(65536);
     }
 
-    // 禁止拷贝构造和拷贝赋值
-    ExternalStorage(const ExternalStorage&) = delete;
-    ExternalStorage& operator=(const ExternalStorage&) = delete;
+
+    ExternalStorage(const ExternalStorage& other) {
+        l2_memory_pool = other.l2_memory_pool;
+        l2_max_size = other.l2_max_size;
+        heat_index = other.heat_index;
+        descriptor_map = other.descriptor_map;
+        hash_to_slot = other.hash_to_slot;
+        feature_index = other.feature_index;
+        promote_threshold = other.promote_threshold;
+        demote_threshold = other.demote_threshold;
+        current_time = 0;
+        next_slot_id = other.next_slot_id;
+        persistence_path = other.persistence_path + ".cp";
+    };
+    ExternalStorage& operator=(const ExternalStorage& other) {
+        return ExternalStorage(other);
+    }
 
     // ===== 核心API =====
 
