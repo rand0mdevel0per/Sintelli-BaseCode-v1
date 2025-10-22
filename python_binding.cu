@@ -12,8 +12,11 @@
 // 全局模型和输出队列
 static NeuronModel<32> *g_model = nullptr;
 static std::queue<std::string> g_output_queue;
+static std::queue<std::string> g_output_img_queue;
 static std::mutex g_output_mutex;
+static std::mutex g_output_img_mut;
 static std::condition_variable g_output_cv;
+static std::condition_variable g_output_img_cv;
 static bool g_model_running = false;
 
 // 输出收集线程
@@ -30,6 +33,12 @@ void output_collector_loop() {
                 std::lock_guard<std::mutex> lock(g_output_mutex);
                 g_output_queue.push(output.text);
                 g_output_cv.notify_one();
+            }
+
+            if (output.has_img && !output.base64_image.empty()) {
+                std::lock_guard<std::mutex> lock(g_output_img_mut);
+                g_output_img_queue.push(output.base64_image);
+                g_output_img_cv.notify_one();
             }
         }
 
@@ -97,7 +106,7 @@ static PyObject* py_start_model(PyObject* self, PyObject* args) {
     }
 }
 
-// 3. 输入文本
+// 3. 输入
 static PyObject* py_input(PyObject* self, PyObject* args) {
     try {
         const char* text;
@@ -175,6 +184,45 @@ static PyObject* py_clear_outputs(PyObject* self, PyObject* args) {
     Py_RETURN_NONE;
 }
 
+static PyObject* py_get_next_output_img(PyObject* self, PyObject* args) {
+    double timeout_sec = 1.0;
+
+    if (!PyArg_ParseTuple(args, "|d", &timeout_sec)) {
+        return NULL;
+    }
+
+    std::unique_lock<std::mutex> lock(g_output_img_mut);
+
+    // 等待输出或超时
+    if (g_output_img_cv.wait_for(lock,
+                             std::chrono::milliseconds((int)(timeout_sec * 1000)),
+                             []{ return !g_output_img_queue.empty(); })) {
+        // 有输出
+        std::string output = g_output_img_queue.front();
+        g_output_queue.pop();
+
+        return PyUnicode_FromString(output.c_str());
+                             }
+
+    // 超时，返回None
+    Py_RETURN_NONE;
+}
+
+// 5. 检查是否有输出可用
+static PyObject* py_has_output_img(PyObject* self, PyObject* args) {
+    std::lock_guard<std::mutex> lock(g_output_img_mut);
+    return PyBool_FromLong(!g_output_queue.empty());
+}
+
+// 6. 清空输出队列
+static PyObject* py_clear_outputs_img(PyObject* self, PyObject* args) {
+    std::lock_guard<std::mutex> lock(g_output_img_mut);
+    while (!g_output_img_queue.empty()) {
+        g_output_img_queue.pop();
+    }
+    Py_RETURN_NONE;
+}
+
 // 7. 停止模型
 static PyObject* py_stop_model(PyObject* self, PyObject* args) {
     if (g_model) {
@@ -218,13 +266,22 @@ static PyMethodDef NeuronMethods[] = {
      "Input content to model\n\nArgs:\n    text (str): Input text [optional] , image (str): Input image(base64)[optional] , role (str) : User role[optional]"},
 
     {"get_next_output", py_get_next_output, METH_VARARGS,
-     "Get next output (blocking with timeout)\n\nArgs:\n    timeout (float): Timeout in seconds (default 1.0)\n\nReturns:\n    str or None"},
+     "Get next text output (blocking with timeout)\n\nArgs:\n    timeout (float): Timeout in seconds (default 1.0)\n\nReturns:\n    str or None"},
 
     {"has_output", py_has_output, METH_VARARGS,
-     "Check if output is available\n\nReturns:\n    bool"},
+     "Check if text output is available\n\nReturns:\n    bool"},
 
     {"clear_outputs", py_clear_outputs, METH_VARARGS,
-     "Clear output queue"},
+     "Clear text output queue"},
+
+    {"get_next_output_img", py_get_next_output_img, METH_VARARGS,
+     "Get next image output (blocking with timeout)\n\nArgs:\n    timeout (float): Timeout in seconds (default 1.0)\n\nReturns:\n    str or None"},
+
+    {"has_output_img", py_has_output_img, METH_VARARGS,
+     "Check if image output is available\n\nReturns:\n    bool"},
+
+    {"clear_outputs_img", py_clear_outputs_img, METH_VARARGS,
+     "Clear image output queue"},
 
     {"stop_model", py_stop_model, METH_VARARGS,
      "Stop the model"},
