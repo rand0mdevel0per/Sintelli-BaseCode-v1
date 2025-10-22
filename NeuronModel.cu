@@ -993,14 +993,16 @@ private:
         for (ull i = 0; i < total_neurons; i++) {
             d_neurons[i].load(other.d_neurons[i].save());
         }
+        resetPointersForSerialization();
+        rebuildPointerConnections();
     }
 
     void rebuildPointerConnections() {
         // 重新构建所有神经元的指针连接
         for (int idx = 0; idx < GRID_SIZE * GRID_SIZE * GRID_SIZE; idx++) {
-            int x = idx / (GRID_SIZE * GRID_SIZE);
-            int y = (idx / GRID_SIZE) % GRID_SIZE;
-            int z = idx % GRID_SIZE;
+            ull x = idx / (GRID_SIZE * GRID_SIZE);
+            ull y = (idx / GRID_SIZE) % GRID_SIZE;
+            ull z = idx % GRID_SIZE;
 
             // 重设队列指针
             d_neurons[idx].setQueuePointer(&queues[x][y][z]);

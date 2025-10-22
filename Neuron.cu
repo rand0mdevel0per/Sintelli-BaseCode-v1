@@ -189,6 +189,16 @@ public:
         return true;
     }
 
+    [[nodiscard]] double get_noise() const {return noise;}
+    [[nodiscard]] double get_learn_rt() const {return learn;}
+
+    void set_noise(double new_ns) {
+        noise = new_ns;
+    }
+    void set_learn_rt(double new_rt) {
+        learn = new_rt;
+    }
+
     /**
      * @brief 生成[0,1)范围内的正随机数
      * @return double 均匀分布的随机数
@@ -526,6 +536,9 @@ private:
     __managed__ bool core_xor_array[2048][2048]{};
     __managed__ double cor_xor_clip_array[2048][2048]{};
     */
+
+    __managed__ double noise;
+    __managed__ double learn;
 
     // ===== 添加卷积相关成员 =====
     __managed__ ConvKernel input_conv_kernels[4][8]{}; // 每个端口8个卷积核
@@ -1331,13 +1344,14 @@ private:
      */
     __device__ void executeMicroCorrection() {
         double alpha = 0.3;
-        double eta_micro = 0.05;
+        double eta_micro = 0.05 + max(min(learn,1.0),0.0) * 0.0001;
 
         for (int i = 0; i < 256; i++) {
             for (int j = 0; j < 256; j++) {
                 double T_micro = alpha * PS_aggregate[i][j] +
                                  (1.0 - alpha) * P_Matrix[i][j];
                 P_Matrix[i][j] += eta_micro * (T_micro - P_Matrix[i][j]);
+                P_Matrix[i][j] += max(min(noise,1.0),0.0) * 0.0001 * (randomInRange(0,1) - 0.5);
             }
         }
     }
@@ -1581,11 +1595,11 @@ private:
                 for (int j = 0; j < 256; j++) {
                     // 输入变换矩阵更新
                     double delta_in = learning_rate * inp.array[i][j] * P_Matrix[i][j];
-                    input_multiplex_array[i][j][p] += delta_in;
+                    input_multiplex_array[i][j][p] += delta_in * (1.0 + max(min(learn,1.0),0.0) * 0.001) + noise * 0.0001 * (randomInRange(0,1) - 0.5);
 
                     // 输出变换矩阵更新(对称)
                     double delta_out = learning_rate * P_Matrix[i][j] * inp.array[i][j];
-                    output_multiplex_array[i][j][p] += delta_out;
+                    output_multiplex_array[i][j][p] += delta_out * (1.0 + max(min(learn,1.0),0.0) * 0.001) + noise * 0.0001 * (randomInRange(0,1) - 0.5);
 
                     // 防止权重爆炸
                     input_multiplex_array[i][j][p] = fmax(-2.0, fmin(2.0, input_multiplex_array[i][j][p]));
