@@ -57,7 +57,8 @@ public:
                           double min_relevance = 0.3,
                           int max_length = 2000);
     
-    // === 数据源加载方法 ===
+    // === Data Source Loading Methods ===
+    // Methods for loading knowledge from various data sources including URLs, files, and APIs
     
     // 从URL加载知识库（支持Wikipedia、arXiv等）
     bool loadFromURL(const std::string& url, const std::string& category = "general");
@@ -82,37 +83,96 @@ public:
     // 从CSV数据加载知识库
     bool loadFromCSV(const std::string& csv_data, const std::string& category = "general");
     
-    // === Hugging Face数据集流式解析方法 ===
+    // === Hugging Face Dataset Streaming Methods ===
+    // Methods for streaming and processing Hugging Face datasets
+    // Supports large dataset processing without memory overflow
     
-    // 流式解析Hugging Face数据集
+    /**
+     * @brief Stream and parse Hugging Face dataset.
+     * 
+     * Processes large Hugging Face datasets in streaming mode to avoid memory overflow.
+     * Supports various dataset subsets and splits with configurable entry limits.
+     * 
+     * @param dataset_name Name of the Hugging Face dataset
+     * @param subset Dataset subset (default: "default")
+     * @param split Data split (default: "train")
+     * @param max_entries Maximum number of entries to process
+     * @param category Category for the processed entries
+     * @return true if successful, false otherwise
+     */
     bool streamHuggingFaceDataset(const std::string& dataset_name, 
                                  const std::string& subset = "default",
                                  const std::string& split = "train",
                                  int max_entries = 100,
                                  const std::string& category = "huggingface");
     
-    // 从Hugging Face数据集查询并加载相关条目
+    /**
+     * @brief Query and load relevant entries from Hugging Face dataset.
+     * 
+     * Searches Hugging Face dataset for entries matching the query text.
+     * Useful for targeted knowledge retrieval and RAG enhancement.
+     * 
+     * @param query Search query text
+     * @param dataset_name Name of the Hugging Face dataset
+     * @param subset Dataset subset
+     * @param max_results Maximum number of results to return
+     * @param category Category for the results
+     * @return true if successful, false otherwise
+     */
     bool queryAndLoadFromHFDataset(const std::string& query,
                                   const std::string& dataset_name = "HuggingFaceFW/fineweb",
                                   const std::string& subset = "sample-10BT",
                                   int max_results = 50,
                                   const std::string& category = "huggingface_query");
     
-    // 在Logic匹配不足时自动获取数据
+    /**
+     * @brief Automatically fetch data when Logic matches are insufficient.
+     * 
+     * Dynamically retrieves additional data from external sources when
+     * existing Logic matches fall below the minimum required threshold.
+     * 
+     * @param query Search query to find relevant data
+     * @param min_required_matches Minimum required Logic matches
+     * @param dataset_name Source dataset name
+     * @param subset Dataset subset
+     * @return true if data was successfully fetched and integrated
+     */
     bool autoFetchDataWhenLogicInsufficient(const std::string& query,
                                           int min_required_matches = 5,
                                           const std::string& dataset_name = "HuggingFaceFW/fineweb",
                                           const std::string& subset = "sample-10BT");
     
-    // === Logic生成方法 ===
+    // === Logic Generation Methods ===
+    // Methods for generating Logic trees from knowledge entries
+    // Integrates with AI models for enhanced Logic creation
     
-    // 自动生成Logic树
+    /**
+     * @brief Automatically generate Logic tree from knowledge text.
+     * 
+     * Processes knowledge text to create structured Logic descriptors
+     * with semantic embeddings for matching and retrieval.
+     * 
+     * @param knowledge_text Input knowledge text
+     * @param category Category for the generated Logic
+     * @param activation_threshold Activation threshold for the Logic
+     * @return Vector of generated Logic descriptors
+     */
     std::vector<LogicDescriptor> generateLogicTreeFromKnowledge(
         const std::string& knowledge_text, 
         const std::string& category = "general",
         double activation_threshold = 0.5);
     
-    // 批量生成Logic树
+    /**
+     * @brief Batch generate Logic trees from a category.
+     * 
+     * Creates multiple Logic descriptors from all knowledge entries
+     * belonging to the specified category.
+     * 
+     * @param category Category of knowledge entries to process
+     * @param max_logics Maximum number of Logic descriptors to generate
+     * @param activation_threshold Activation threshold for generated Logic
+     * @return Vector of generated Logic descriptors
+     */
     std::vector<LogicDescriptor> generateLogicTreeFromCategory(
         const std::string& category,
         int max_logics = 50,
@@ -125,7 +185,9 @@ public:
     bool registerLogicTree(LogicSemanticMatcher& matcher, 
                           const std::vector<LogicDescriptor>& logics);
     
-    // === 知识库管理 ===
+    // === Knowledge Base Management ===
+    // Methods for managing and querying the knowledge base
+    // Includes search, statistics, and export functionality
     
     // 添加知识条目
     bool addKnowledgeEntry(const KnowledgeEntry& entry);
@@ -157,7 +219,9 @@ public:
     // 按类别获取知识条目
     std::vector<KnowledgeEntry> getEntriesByCategory(const std::string& category) const;
     
-    // === 配置方法 ===
+    // === Configuration Methods ===
+    // Methods for configuring the RAG knowledge base loader
+    // Allows customization of loading parameters and behavior
     
     // 设置OpenAI客户端
     void setOpenAIClient(std::unique_ptr<OpenAIClient::HttpClient> client);

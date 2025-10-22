@@ -22,15 +22,54 @@ struct ConvKernel16 {
     }
 };
 
-// ===== 自适应消息类型 =====
+// ===== Adaptive Message Types =====
+/**
+ * @enum CompressionMode
+ * @brief Adaptive message compression modes for efficient neural communication
+ * 
+ * Defines different compression strategies for message transmission:
+ * - MODE_FULL: Complete data transmission using unified memory
+ * - MODE_RESIDUAL: 16×16 convolution + 8×8 residual for balanced quality/size
+ * - MODE_CONV_ONLY: 16×16 convolution features only for maximum compression
+ * - MODE_CONTROL: Control messages without data payload
+ * 
+ * Compression decisions are made based on:
+ * - Network activity levels
+ * - Core vulnerability metrics
+ * - Memory pressure
+ * - Importance weighting
+ * - Available bandwidth
+ */
 enum CompressionMode {
-    MODE_FULL,          // 完整数据(使用统一内存)
-    MODE_RESIDUAL,      // 16×16卷积+8×8残差
-    MODE_CONV_ONLY,     // 仅16×16卷积特征
-    MODE_CONTROL        // 控制消息(无数据)
+    MODE_FULL,          // Full data (using unified memory)
+    MODE_RESIDUAL,      // 16×16 convolution + 8×8 residual
+    MODE_CONV_ONLY,     // 16×16 convolution features only
+    MODE_CONTROL        // Control message (no data)
 };
 
-// ===== 控制消息(最小) =====
+// ===== Control Message (Minimal) =====
+/**
+ * @struct ControlMessage
+ * @brief Minimal control message without data payload
+ * 
+ * @details
+ * Ultra-lightweight message for network control and coordination:
+ * - Coordinate information for routing
+ * - Message type identification
+ * - Small metadata payload
+ * 
+ * Used for:
+ * - Network topology discovery
+ * - Connection management
+ * - Status updates
+ * - Control signaling
+ * 
+ * Fields:
+ * - from_coord[3]: Sender coordinates (3D grid position)
+ * - to_coord[3]: Receiver coordinates (3D grid position)
+ * - type: Control message type identifier
+ * - metadata[4]: Small control data payload
+ */
 struct ControlMessage {
     long long from_coord[3];
     long long to_coord[3];
@@ -38,39 +77,134 @@ struct ControlMessage {
     double metadata[4];
 }; // 72 bytes
 
-// ===== 卷积特征消息(小) =====
+// ===== Convolution Feature Message (Small) =====
+/**
+ * @struct ConvMessage
+ * @brief Lightweight message with convolution features only
+ * 
+ * @details
+ * Compact message format containing only essential convolution features:
+ * - 16×16 convolution features from 16 kernels
+ * - Minimal metadata for efficient transmission
+ * 
+ * This is the most compressed message format, suitable for:
+ * - Low-bandwidth communication
+ * - High-frequency messaging
+ * - Memory-constrained environments
+ * - Preliminary information exchange
+ * 
+ * Fields:
+ * - from_coord[3]: Sender coordinates (3D grid position)
+ * - to_coord[3]: Receiver coordinates (3D grid position)
+ * - conv_features[16][16]: Convolution features from 16×16 kernels
+ * - activity: Signal activity level
+ * - type: Message type identifier
+ * - weight: Message propagation weight
+ */
 struct ConvMessage {
     long long from_coord[3];
     long long to_coord[3];
-    double conv_features[16][16];  // 16个卷积核的16×16特征
+    double conv_features[16][16];  // 16×16 features from 16 kernels
     double activity;
     int type;
     double weight;
 }; // ~2.1KB
 
-// ===== 残差增强消息(中) =====
+// ===== Residual Enhanced Message (Medium) =====
+/**
+ * @struct ResidualMessage
+ * @brief Residual-enhanced message with convolution features and residual correction
+ * 
+ * @details
+ * Balanced message format combining:
+ * - 16×16 convolution features for main content
+ * - 8×8 residual correction for fine details
+ * - Coordinate and metadata for routing
+ * 
+ * This format provides a good balance between:
+ * - Transmission efficiency (compressed size)
+ * - Data quality (residual correction)
+ * - Computational overhead (moderate complexity)
+ * 
+ * Fields:
+ * - from_coord[3]: Sender coordinates (3D grid position)
+ * - to_coord[3]: Receiver coordinates (3D grid position)
+ * - conv_features[16][16]: Main convolution features
+ * - residual[8][8]: Residual correction data
+ * - activity: Signal activity level
+ * - type: Message type identifier
+ * - weight: Message propagation weight
+ */
 struct ResidualMessage {
     long long from_coord[3];
     long long to_coord[3];
-    double conv_features[16][16];  // 主要特征
-    double residual[8][8];         // 残差修正
+    double conv_features[16][16];  // Main features
+    double residual[8][8];         // Residual correction
     double activity;
     int type;
     double weight;
 }; // ~2.6KB
 
-// ===== 完整数据消息(大,使用统一内存池) =====
+// ===== Full Data Message (Large, using unified memory pool) =====
+/**
+ * @struct FullMessage
+ * @brief Complete data message using unified memory for high-fidelity transmission
+ * 
+ * @details
+ * Full data message for high-quality neural communication:
+ * - 256×256 complete data matrix using unified memory
+ * - Coordinate information for routing
+ * - Memory pool management with reference counting
+ * - Activity level and weight for signal strength
+ * 
+ * Features:
+ * - High-fidelity data transmission
+ * - Memory-efficient unified memory allocation
+ * - Automatic memory pool management
+ * - Reference counting for safe memory reuse
+ * 
+ * Fields:
+ * - from_coord[3]: Sender coordinates (3D grid position)
+ * - to_coord[3]: Receiver coordinates (3D grid position)
+ * - data_ptr: Pointer to unified memory block
+ * - pool_block_id: Memory pool block identifier
+ * - activity: Signal activity level
+ * - type: Message type identifier
+ * - weight: Message propagation weight
+ */
 struct FullMessage {
     long long from_coord[3];
     long long to_coord[3];
-    double* data_ptr;              // 指向统一内存
-    int pool_block_id;             // 内存池块ID
+    double* data_ptr;              // Pointer to unified memory
+    int pool_block_id;             // Memory pool block ID
     double activity;
     int type;
     double weight;
 }; // 80 bytes
 
-// ===== 统一内存池(用于完整数据传输) =====
+// ===== Unified Memory Pool (for full data transmission) =====
+/**
+ * @class UnifiedMemoryPool
+ * @brief Memory pool for managing unified memory allocations in neural network
+ * 
+ * @details
+ * Centralized memory management system for FullMessage data transmission:
+ * - Pre-allocated unified memory blocks
+ * - Reference counting for safe sharing
+ * - Automatic cleanup and reuse
+ * - Thread-safe operations
+ * 
+ * Features:
+ * - Efficient memory allocation without runtime overhead
+ * - Reference counting for shared data access
+ * - Automatic garbage collection of unused blocks
+ * - GPU-CPU unified memory for seamless access
+ * 
+ * The pool manages:
+ * - 4096 pre-allocated 256×256 double precision blocks
+ * - Reference counting for each block
+ * - Usage tracking and cleanup
+ */
 class UnifiedMemoryPool {
 private:
     static constexpr int MAX_BLOCKS = 4096;
@@ -146,7 +280,28 @@ public:
 // ===== 全局统一内存池实例 =====
 __managed__ UnifiedMemoryPool global_memory_pool;
 
-// ===== 卷积和残差计算 =====
+// ===== Convolution and Residual Processing =====
+/**
+ * @class ConvResidualProcessor
+ * @brief Utility class for convolution and residual processing operations
+ * 
+ * @details
+ * Provides optimized CUDA implementations of:
+ * - 16×16 convolution (256×256 → 16×16)
+ * - 8×8 residual extraction
+ * - Feature encoding and decoding
+ * 
+ * Used for:
+ * - Message compression and decompression
+ * - Feature extraction from high-dimensional data
+ * - Residual encoding for quality enhancement
+ * - Memory-efficient data representation
+ * 
+ * All operations are optimized for GPU execution with:
+ * - Memory coalescing
+ * - Shared memory usage
+ * - Thread parallelization
+ */
 class ConvResidualProcessor {
 public:
     // 16×16卷积(256×256 → 16×16)

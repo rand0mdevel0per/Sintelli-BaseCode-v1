@@ -115,18 +115,21 @@ struct FeatureVector {
     }
 };
 
-// ===== 数据描述符 =====
+// ===== Data Descriptor =====
+// Structure that describes data stored in the external storage system
+// Contains metadata about data location, access patterns, and features
+// Data descriptor structure
 struct DataDescriptor {
-    uint64_t slot_id;
-    std::string hash_value;            // 数据的hash值
-    double heat;                    // ISW热度
-    uint32_t last_access_time;
-    uint32_t access_count;
-    StorageTier tier;
-    size_t data_size;               // 数据大小(字节)
-    std::string feature_hash;       // 特征向量hash值
-    std::string feature_type;       // 特征类型
-    size_t feature_dimension;       // 特征维度
+    uint64_t slot_id;                    // Unique slot identifier
+    std::string hash_value;            // Hash value of the data
+    double heat;                    // ISW heat (access frequency metric)
+    uint32_t last_access_time;       // Timestamp of last access
+    uint32_t access_count;           // Number of times accessed
+    StorageTier tier;                // Storage tier (L1, L2, L3)
+    size_t data_size;               // Data size in bytes
+    std::string feature_hash;       // Hash of feature vector
+    std::string feature_type;       // Type of feature vector
+    size_t feature_dimension;       // Dimension of feature vector
 
     // ISW热度计算喵
     double computeHeat(uint32_t current_time) const {
@@ -425,7 +428,17 @@ private:
     std::string persistence_path;
 
 public:
-    // 构造函数喵
+    /**
+     * @brief ExternalStorage constructor.
+     * 
+     * Initializes the external storage system with tiered storage management.
+     * Sets up L2 host memory pool and L3 NVMe disk storage with automatic promotion/demotion.
+     * 
+     * @param max_l2_size Maximum size of L2 host memory pool
+     * @param promote_thresh Heat threshold for promoting data from L3 to L2
+     * @param demote_thresh Heat threshold for demoting data from L2 to L3
+     * @param persist_path Path for persistent L3 storage
+     */
     ExternalStorage(size_t max_l2_size = 1024,
                     double promote_thresh = 100.0,
                     double demote_thresh = 1.0,
@@ -437,7 +450,7 @@ public:
           next_slot_id(0),
           persistence_path(persist_path)
     {
-        // 初始化vEB树(假设热度范围0-65535)
+        // Initialize vEB tree for heat-based indexing (assuming heat range 0-65535)
         heat_index = std::make_unique<vEB_Tree<DataDescriptor>>(65536);
     }
 
@@ -459,9 +472,19 @@ public:
         return ExternalStorage(other);
     }
 
-    // ===== 核心API =====
+    // ===== Core API =====
+    // Essential methods for data storage and retrieval operations
 
-    // 存储数据(需要数据提供hash()函数) 喵
+    /**
+     * @brief Store data in external storage.
+     * 
+     * Stores data with automatic tier placement based on initial heat value.
+     * Requires data type T to provide a hash() method.
+     * 
+     * @param data Data to be stored
+     * @param initial_heat Initial heat value for the data (affects tier placement)
+     * @return Unique slot ID for the stored data
+     */
     template<typename = std::enable_if_t<
         std::is_invocable_r_v<std::string, decltype(&T::hash), T>>>
     uint64_t store(const T& data, double initial_heat = 1.0) {
@@ -475,7 +498,16 @@ public:
         return storeWithFeature(data, feature, initial_heat);
     }
 
-    // 通过slot_id获取数据 喵
+    /**
+     * @brief Fetch data by slot ID.
+     * 
+     * Retrieves data from storage by its unique slot identifier.
+     * Automatically updates access heat and manages tier promotion/demotion.
+     * 
+     * @param slot_id Unique identifier of the data to fetch
+     * @param out_data Reference to store the fetched data
+     * @return true if successful, false if data not found
+     */
     bool fetch(uint64_t slot_id, T& out_data) {
         std::lock_guard<std::mutex> lock(storage_mutex);
         current_time++;
@@ -488,7 +520,16 @@ public:
         return fetchInternal(it->second, out_data);
     }
 
-    // 通过hash值获取数据 喵
+    /**
+     * @brief Fetch data by hash value.
+     * 
+     * Retrieves data from storage by its hash value.
+     * Useful for deduplication and content-based retrieval.
+     * 
+     * @param hash_val Hash value of the data to fetch
+     * @param out_data Reference to store the fetched data
+     * @return true if successful, false if data not found
+     */
     template<typename = std::enable_if_t<
         std::is_invocable_r_v<std::string, decltype(&T::hash), T>>>
     bool fetchByHash(std::string hash_val, T& out_data) {
@@ -508,7 +549,15 @@ public:
         return fetchInternal(desc_it->second, out_data);
     }
 
-    // 批量获取(优化传输) 喵
+    /**
+     * @brief Batch fetch multiple data items.
+     * 
+     * Efficiently retrieves multiple data items in a single operation.
+     * Optimized for reduced I/O overhead and better performance.
+     * 
+     * @param slot_ids Vector of slot IDs to fetch
+     * @return Vector of fetched data items
+     */
     std::vector<T> fetchBatch(const std::vector<uint64_t>& slot_ids) {
         std::vector<T> results;
         results.reserve(slot_ids.size());
