@@ -387,7 +387,7 @@ public:
         return logic_matcher->removeLogic(logic_id);
     }
 
-    bool input(InputMessage msg) {
+    bool input(const InputMessage& msg, const std::string& role) {
         try {
             if (msg.has_img) {
                 ImageData img = base64_to_image(msg.base64_image);
@@ -403,11 +403,11 @@ public:
                 d_neurons[0].inject(img_inp, 1);
             }
             if (msg.has_text) {
-                processTextString(&processor, msg.text);
+                processTextString(&processor, "<User:" + role + "> " + msg.text);
                 std::vector<float> txt_d = feature_extractor->extractTextFeature(msg.text).data;
-                float *text_data = new float[txt_d.size()];
+                auto *text_data = new float[txt_d.size()];
                 memcpy(text_data, txt_d.data(), txt_d.size() * sizeof(float));
-                double *text_data_d = new double[txt_d.size()];
+                auto text_data_d = new double[txt_d.size()];
                 for (size_t i = 0; i < txt_d.size(); i++) {
                     text_data_d[i] = static_cast<double>(txt_d[i]);
                 }
@@ -416,13 +416,13 @@ public:
                 for (size_t i = 0; i < 128; i++) {
                     query_emb[i] = static_cast<double>(emb_flt[i]);
                 }
-                std::thread([this, &query_emb, msg, text_data_d](){
+                std::thread([this, &query_emb, msg, text_data_d, role](){
                     auto indices = sct.recallTopK(query_emb, 10); // 召回top-10相关文本
                     auto contents = sct.getRecalledTexts(indices);
-                    for (auto ct: contents) {
+                    for (const auto& ct: contents) {
                         processTextString(&sct_processor, ct);
                     }
-                    sct.addTurn(msg.text, text_data_d);
+                    sct.addTurn("<User:" + role + "> " + msg.text, text_data_d);
                 }).detach();
                 auto input_emb = feature_extractor->extractTextFeature(msg.text);
                 auto matched_logics = logic_injector->findMatchingLogicIds(msg.text);
@@ -472,7 +472,7 @@ public:
                 }
                 std::thread([this, matched_logics](){
                     for (const auto &logic_id: matched_logics) {
-                        Logic curr_logic;
+                        Logic curr_logic{};
                         logic_tree.fetchByHash(logic_id.first, curr_logic);
                         char *curr_logic_str = wideCharToMultiByte(curr_logic.content);
                         processTextString(&logic_processor, std::string(curr_logic_str));
@@ -481,9 +481,9 @@ public:
                 }).detach();
                 std::thread([this, msg](){
                     auto matched_memories = memory_injector->findMatchingLogicIds(msg.text);
-                    for (const auto &memory_id: matched_memories) {
+                    for (const auto &key: matched_memories | views::keys) {
                         MemorySlot curr_memory;
-                        memory_tree.fetchByHash(memory_id.first, curr_memory);
+                        memory_tree.fetchByHash(key, curr_memory);
                         const char *curr_memory_str = reinterpret_cast<const char *>(curr_memory.content.c_str);
                         processTextString(&memory_processor, std::string(curr_memory_str));
                         delete[] curr_memory_str;
@@ -497,7 +497,7 @@ public:
     }
 
     InputMessage getoutput() {
-        std::lock_guard<std::mutex> lock(msg_mutex);
+        std::lock_guard lock(msg_mutex);
         if (!output_msgs.empty()) {
             InputMessage msg = output_msgs.back();
             output_msgs.pop_back();
@@ -524,8 +524,8 @@ public:
         std::cout << "正在关闭神经元网络喵..." << std::endl;
         this->stop();
         // 等待所有流完成
-        for (int i = 0; i < 4; i++) {
-            cudaStreamSynchronize(streams[i]);
+        for (const auto & stream : streams) {
+            cudaStreamSynchronize(stream);
         }
         if (d_neurons) {
             // 调用每个神经元的析构函数
@@ -562,6 +562,7 @@ private:
     std::mutex msg_mutex;
     std::vector<std::string> current_logic;
     std::queue<std::string> cache_queue;
+    std::string output_cache = "<You> ";
 
     // 语义匹配相关成员
     std::unique_ptr<FeatureExtractor> feature_extractor;
@@ -729,6 +730,19 @@ private:
                 std::string text = matrix_to_string(&current_matrix);
                 cache_msg.has_text = true;
                 cache_msg.text = text;
+                output_cache.append(text);
+            }else if (!output_cache.empty()) {
+                auto output_ch = output_cache;
+                std::thread([this, output_ch](){
+                    const auto fea = feature_extractor->extractTextFeature(output_ch).data;
+                    double txt_emb[128]{};
+                    for (int i = 0; i < 128 ; i++) {
+                        txt_emb[i] = static_cast<double>(fea[i]);
+                    }
+                    sct.addTurn(output_cache, txt_emb);
+                }).detach();
+                output_cache.clear();
+                output_cache = "<You> ";
             }
             if (ImageProcessor::isValidFrame(&current_matrix_0, &previous_matrix_0)) {
                 matrix_cache_img[curr_img_mat] = current_matrix_0;
