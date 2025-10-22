@@ -31,6 +31,10 @@
 #define ll long long
 #define ull unsigned ll
 
+// NeuronModel类的前向声明
+class NeuronModel;
+
+
 /**
  * @brief Template class for managing a 3D grid of neurons.
  *
@@ -212,11 +216,17 @@ public:
             // 保存前重置指针
             resetPointersForSerialization();
 
-            // 创建一个临时对象用于序列化，排除不能拷贝的成员
-            NeuronModel temp_model(GRID_SIZE);
-            temp_model.copyFrom(*this);
+            std::vector<NeuronData> ndata;
 
-            bool result = Serializer<NeuronModel>::save(temp_model, path);
+            for (ull i = 0; i < GRID_SIZE ^ 3 ; i++) {
+                ndata.push_back(d_neurons[i].save());
+            }
+
+            std::pair<NeuronModel,std::vector<NeuronData>> nmdata;
+            nmdata.first.copyFrom(*this);
+            nmdata.second = ndata;
+
+            bool result = Serializer<std::pair<NeuronModel,std::vector<NeuronData>>>::save(nmdata, path);
 
             // 保存后恢复指针连接
             rebuildPointerConnections();
@@ -230,14 +240,16 @@ public:
     bool load(std::string path = "") {
         if (path.empty()) path = path_default;
         try {
-            // 简化加载逻辑：直接加载到当前对象
-            if (!Serializer<NeuronModel>::load(*this, path)) {
+            std::pair<NeuronModel,std::vector<NeuronData>> nmdata;
+            if (!Serializer<std::pair<NeuronModel,std::vector<NeuronData>>>::load(nmdata, path)) {
                 return false;
             }
-
-            // 重新构建指针连接
+            this->copyFrom(nmdata.first);
+            for (ull i = 0; i < nmdata.second.size() ; i++) {
+                d_neurons[i].load(nmdata.second[i]);
+            }
+            resetPointersForSerialization();
             rebuildPointerConnections();
-
             return true;
         } catch (...) {
             return false;
@@ -543,7 +555,7 @@ public:
 private:
     ull GRID_SIZE = 32;
     cudaStream_t streams[4];
-    bool *d_active_flags;
+    __managed__ bool *d_active_flags;
     std::thread eventloop;
     ull NEURON_COUNT = 0; // 将在构造函数中初始化
     ull THREADS_PER_BLOCK = 256;
@@ -554,7 +566,7 @@ private:
     SemanticConversationTree sct{};
     ExternalStorage<Logic> logic_tree{};
     ExternalStorage<MemorySlot> memory_tree{};
-    std::string path_default = "./models/Si/model.nm1";
+    std::string path_default = "./models/Si/model.nm2";
     UnifiedInputProcessor processor;
     E5LargeModel *e5;
     std::vector<InputMessage> output_msgs;
@@ -971,16 +983,15 @@ private:
     }
 
     void copyFrom(const NeuronModel &other) {
-        // 复制基础数据（不复制指针，只复制状态数据）
         path_default = other.path_default;
-
-        // 注意：ExternalStorage对象不进行拷贝，它们管理着独立的资源
-        // ext_kfe, sct, logic_tree, memory_tree 保持不变
-
-        // 复制神经元状态（如果需要）
+        ext_kfe = other.ext_kfe;
+        sct = other.sct;
+        logic_tree = other.logic_tree;
+        memory_tree = other.memory_tree;
+        memcpy(d_active_flags, other.d_active_flags, sizeof(d_active_flags));
         ull total_neurons = GRID_SIZE * GRID_SIZE * GRID_SIZE;
         for (ull i = 0; i < total_neurons; i++) {
-            d_neurons[i] = other.d_neurons[i];
+            d_neurons[i].load(other.d_neurons[i].save());
         }
     }
 
