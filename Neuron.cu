@@ -490,6 +490,17 @@ public:
         return queue;
     }
 
+    __device__ void adjust_weights_rl(double delta) {
+        // 更新核心权重矩阵
+        for(int i=0; i<256; i++) {
+            for(int j=0; j<256; j++) {
+                W_predict[i][j] += delta * P_Matrix[i][j];
+                // 裁剪防止爆炸
+                W_predict[i][j] = fmax(-2.0, fmin(2.0, W_predict[i][j]));
+            }
+        }
+    }
+
 private:
     // ===== 随机数和基础状态 =====
     __managed__ curandStatePhilox4_32_10_t rand_state{};
@@ -1284,6 +1295,9 @@ private:
         double P_Next[256][256];
         double temp_product[256][256];
 
+        double P_Original[256][256];
+        memcpy(&P_Original,&P_Matrix,sizeof(P_Matrix));
+
         // P_Matrix × W_predict
         matmul_double(&P_Matrix[0][0], &W_predict[0][0], &temp_product[0][0]);
 
@@ -1379,6 +1393,13 @@ private:
         memcpy(P_stable, P_current, sizeof(P_stable));
 
         updateCoreVulnerability();
+
+        for(int i=0; i<256; i++) {
+            for(int j=0; j<256; j++) {
+                P_Matrix[i][j] = 0.9 * P_Matrix[i][j] + 0.1 * P_Original[i][j];
+            }
+        }
+        layerNorm(&P_Matrix[0][0], 256*256);
     }
 
     /**
@@ -1656,6 +1677,20 @@ private:
             }
         }
     }
+
+    __device__ void layerNorm(double* data, int size) {
+        double mean = 0.0, var = 0.0;
+        for(int i=0; i<size; i++) mean += data[i];
+        mean /= size;
+
+        for(int i=0; i<size; i++) var += (data[i] - mean) * (data[i] - mean);
+        var /= size;
+
+        double std = sqrt(var + 1e-6);
+        for(int i=0; i<size; i++) {
+            data[i] = (data[i] - mean) / std;
+        }
+    }
     
     // ===== 单步推理函数 =====
     // 输入: Message (to_coord必须等于local_coord)
@@ -1795,5 +1830,30 @@ __global__ void update_activity(Neuron* neurons, bool* active_flags, double* tra
 __global__ void reset_trace(double* trace) {
     ull tid = blockIdx.x * blockDim.x + threadIdx.x;
     trace[tid] = 0;
+}
+
+__global__ void apply_trace_to_neurons(
+    Neuron* neurons,
+    double* trace,
+    double global_score,
+    ull count
+) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= count) return;
+
+    // 只更新有贡献的神经元
+    if (trace[tid] > 0.01) {
+        // 获取当前神经元的活跃度
+        double activity = neurons[tid].get_activity();
+
+        // 计算权重更新量
+        // Policy Gradient: ∇J = E[(R - b) × ∇log π]
+        double advantage = global_score - 0.5;
+        double gradient = trace[tid] * advantage;
+        double delta_w = 0.01 * trace[tid] * global_score * activity * gradient;
+
+        // 调用神经元的权重更新函数
+        neurons[tid].adjust_weights_rl(delta_w);
+    }
 }
 #endif //SRC_NEURON_H
