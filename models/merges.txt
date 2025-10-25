@@ -1,0 +1,2 @@
+# BPE merges for E5 tokenizer
+# This file would contain the merge operations for byte pair encoding
