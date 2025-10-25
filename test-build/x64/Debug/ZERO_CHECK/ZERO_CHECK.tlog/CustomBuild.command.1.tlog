@@ -1,0 +1,10 @@
+^E:\SINTELLI\SRC\TEST-BUILD\CMAKEFILES\80313E51F8ABB25BCDA5D404695B5865\GENERATE.STAMP.RULE
+setlocal
+D:\CMake\bin\cmake.exe -SE:/Sintelli/src -BE:/Sintelli/src/test-build --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file E:/Sintelli/src/test-build/test_simple.sln
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

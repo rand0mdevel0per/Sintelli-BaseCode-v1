@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="E:\Sintelli\src\test-build\CMakeFiles\80313e51f8abb25bcda5d404695b5865\generate.stamp.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{AD43C863-B772-335B-859F-00133B7DF717}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>
