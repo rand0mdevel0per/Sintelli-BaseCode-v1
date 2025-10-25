@@ -24,6 +24,67 @@ using json = nlohmann::json;
 
 namespace OpenAIClient {
 
+/**
+ * @struct ChatMessageContentPart
+ * @brief Represents a part of a message content (text or image)
+ */
+struct ChatMessageContentPart {
+    std::string type;              ///< Type of content: "text" or "image_url"
+    std::string text;              ///< Text content (when type is "text")
+    std::string image_url;         ///< Image URL (when type is "image_url")
+    
+    /**
+     * @brief Construct a text content part
+     * 
+     * @param text_content The text content
+     */
+    ChatMessageContentPart(const std::string& text_content) 
+        : type("text"), text(text_content) {}
+    
+    /**
+     * @brief Construct an image content part
+     * 
+     * @param img_url The image URL
+     */
+    ChatMessageContentPart(const std::string& img_url, bool is_image) 
+        : type(is_image ? "image_url" : "text"), image_url(img_url) {}
+    
+    /**
+     * @brief Construct an image content part (convenience constructor)
+     * 
+     * @param img_url The image URL
+     */
+    ChatMessageContentPart(const std::string& img_url) 
+        : type("image_url"), image_url(img_url) {}
+    
+    /**
+     * @brief Construct an image content part from base64 data
+     * 
+     * @param base64_data The base64 encoded image data
+     * @param mime_type The MIME type of the image (e.g., "image/jpeg", "image/png")
+     */
+    ChatMessageContentPart(const std::string& base64_data, const std::string& mime_type) 
+        : type("image_url"), image_url("data:" + mime_type + ";base64," + base64_data) {}
+    
+    /**
+     * @brief Convert the content part to JSON format
+     * 
+     * @return json JSON representation of the content part
+     */
+    json to_json() const {
+        json j;
+        j["type"] = type;
+        if (type == "text") {
+            j["text"] = text;
+        } else if (type == "image_url") {
+            json image_obj;
+            image_obj["url"] = image_url;
+            j["image_url"] = image_obj;
+        }
+        return j;
+    }
+};
+
 /**
  * @struct ChatMessage
  * @brief Represents a message in a chat conversation
@@ -33,18 +94,29 @@ namespace OpenAIClient {
  */
 struct ChatMessage {
     std::string role;      ///< Role of the message sender: "system", "user", "assistant"
-    std::string content;   ///< The actual content of the message
+    std::string content;   ///< The actual content of the message (legacy text-only)
+    std::vector<ChatMessageContentPart> content_parts; ///< Content parts for multimodal support
     std::string name;      ///< Optional: name of the participant
     
     /**
-     * @brief Construct a new Message object
+     * @brief Construct a new Message object with text content
      * 
      * @param r Role of the message sender
      * @param c Content of the message
      * @param n Optional name of the participant
      */
-    Message(const std::string& r, const std::string& c, const std::string& n = "")
+    ChatMessage(const std::string& r, const std::string& c, const std::string& n = "")
         : role(r), content(c), name(n) {}
+    
+    /**
+     * @brief Construct a new Message object with content parts
+     * 
+     * @param r Role of the message sender
+     * @param parts Content parts for multimodal messages
+     * @param n Optional name of the participant
+     */
+    ChatMessage(const std::string& r, const std::vector<ChatMessageContentPart>& parts, const std::string& n = "")
+        : role(r), content(""), content_parts(parts), name(n) {}
     
     /**
      * @brief Convert the message to JSON format
@@ -54,7 +126,18 @@ struct ChatMessage {
     json to_json() const {
         json j;
         j["role"] = role;
-        j["content"] = content;
+        
+        // If content_parts is provided, use it (multimodal format)
+        if (!content_parts.empty()) {
+            j["content"] = json::array();
+            for (const auto& part : content_parts) {
+                j["content"].push_back(part.to_json());
+            }
+        } else {
+            // Otherwise, use legacy text-only format
+            j["content"] = content;
+        }
+        
         if (!name.empty()) {
             j["name"] = name;
         }
@@ -115,6 +198,7 @@ struct ChatCompletionResponse {
     struct Choice {
         int index;                ///< Index of the choice in the response
         ChatMessage message;      ///< Generated message content
+        std::string delta;        ///< Delta content for streaming responses
         std::string finish_reason; ///< Reason why generation stopped
     };
     
@@ -143,26 +227,40 @@ struct ChatCompletionResponse {
      */
     static ChatCompletionResponse from_json(const json& j) {
         ChatCompletionResponse response;
-        response.id = j["id"];
-        response.object = j["object"];
-        response.created = j["created"];
-        response.model = j["model"];
+        if (j.contains("id")) response.id = j["id"];
+        if (j.contains("object")) response.object = j["object"];
+        if (j.contains("created")) response.created = j["created"];
+        if (j.contains("model")) response.model = j["model"];
         
         if (j.contains("choices") && j["choices"].is_array()) {
             for (const auto& choice : j["choices"]) {
                 Choice c;
-                c.index = choice["index"];
-                c.message.role = choice["message"]["role"];
-                c.message.content = choice["message"]["content"];
-                c.finish_reason = choice["finish_reason"];
+                if (choice.contains("index")) c.index = choice["index"];
+                
+                if (choice.contains("delta")) {
+                    // Streaming response
+                    if (choice["delta"].contains("content")) {
+                        c.delta = choice["delta"]["content"];
+                    }
+                } else if (choice.contains("message")) {
+                    // Non-streaming response
+                    c.message.role = choice["message"]["role"];
+                    if (choice["message"].contains("content")) {
+                        c.message.content = choice["message"]["content"];
+                    }
+                }
+                
+                if (choice.contains("finish_reason")) {
+                    c.finish_reason = choice["finish_reason"];
+                }
                 response.choices.push_back(c);
             }
         }
         
         if (j.contains("usage")) {
-            response.usage.prompt_tokens = j["usage"]["prompt_tokens"];
-            response.usage.completion_tokens = j["usage"]["completion_tokens"];
-            response.usage.total_tokens = j["usage"]["total_tokens"];
+            if (j["usage"].contains("prompt_tokens")) response.usage.prompt_tokens = j["usage"]["prompt_tokens"];
+            if (j["usage"].contains("completion_tokens")) response.usage.completion_tokens = j["usage"]["completion_tokens"];
+            if (j["usage"].contains("total_tokens")) response.usage.total_tokens = j["usage"]["total_tokens"];
         }
         
         return response;
@@ -374,10 +472,23 @@ public:
         // Initialize HTTP client
     }
     
-    /**
-     * @copydoc OpenAIClient::createChatCompletion
-     */
-    ChatCompletionResponse createChatCompletion(const ChatCompletionRequest& request) override;
+    /**
+     * @copydoc OpenAIClient::createChatCompletion
+     */
+    ChatCompletionResponse createChatCompletion(const ChatCompletionRequest& request) override;
+
+    /**
+     * @brief Create a streaming chat completion using the OpenAI-compatible API
+     * 
+     * Sends a chat completion request with streaming enabled and processes
+     * the Server-Sent Events (SSE) responses as they arrive via callback.
+     * 
+     * @param request The chat completion request parameters (stream should be true)
+     * @param callback Callback function to handle each streaming response
+     * @throws std::runtime_error if the request fails
+     */
+    void createChatCompletionStream(const ChatCompletionRequest& request, 
+                                    std::function<void(const ChatCompletionResponse&)> callback);
     
     /**
      * @copydoc OpenAIClient::createFineTuneJob

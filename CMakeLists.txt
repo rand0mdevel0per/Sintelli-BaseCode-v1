@@ -92,6 +92,7 @@ add_library(src SHARED
         external_storage_api.h
         semantic_query_engine.cpp
         semantic_query_engine.h
+        training_interval.cu
 )
 
 # =============================================================================
@@ -175,98 +176,6 @@ if(WIN32)
 else()
     set_target_properties(src PROPERTIES SUFFIX ".so")
 endif()
-
-# =============================================================================
-# 示例程序配置
-# =============================================================================
-
-# ExternalStorage API示例
-add_executable(example_external_storage_api
-    example_external_storage_api.cpp
-)
-
-target_include_directories(example_external_storage_api
-    PRIVATE
-    ${Python3_INCLUDE_DIRS}
-    ${CUTLASS_PATH}/include
-    ${CUTLASS_PATH}/tools/util/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/json
-    ${CMAKE_CURRENT_SOURCE_DIR}/onnx/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/zmq/include
-    ${CUDAToolkit_INCLUDE_DIRS}
-    $<$<BOOL:${LZMA_INCLUDE_DIR}>:${LZMA_INCLUDE_DIR}>
-)
-
-target_link_libraries(example_external_storage_api
-    PRIVATE
-    src
-)
-
-# 增强版RAG演示程序
-add_executable(demo_rag_enhanced
-    demo_rag_enhanced.cpp
-)
-
-target_include_directories(demo_rag_enhanced
-    PRIVATE
-    ${Python3_INCLUDE_DIRS}
-    ${CUTLASS_PATH}/include
-    ${CUTLASS_PATH}/tools/util/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/json
-    ${CMAKE_CURRENT_SOURCE_DIR}/onnx/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/zmq/include
-    ${CUDAToolkit_INCLUDE_DIRS}
-    $<$<BOOL:${LZMA_INCLUDE_DIR}>:${LZMA_INCLUDE_DIR}>
-)
-
-target_link_libraries(demo_rag_enhanced
-    PRIVATE
-    src
-)
-
-# RAG与Logic系统集成演示程序
-add_executable(demo_rag_logic_integration
-    demo_rag_logic_integration.cpp
-)
-
-target_include_directories(demo_rag_logic_integration
-    PRIVATE
-    ${Python3_INCLUDE_DIRS}
-    ${CUTLASS_PATH}/include
-    ${CUTLASS_PATH}/tools/util/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/json
-    ${CMAKE_CURRENT_SOURCE_DIR}/onnx/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/zmq/include
-    ${CUDAToolkit_INCLUDE_DIRS}
-    $<$<BOOL:${LZMA_INCLUDE_DIR}>:${LZMA_INCLUDE_DIR}>
-)
-
-target_link_libraries(demo_rag_logic_integration
-    PRIVATE
-    src
-)
-
-# Hugging Face RAG集成示例
-add_executable(huggingface_rag_integration
-    huggingface_rag_integration.cpp
-)
-
-target_include_directories(huggingface_rag_integration
-    PRIVATE
-    ${Python3_INCLUDE_DIRS}
-    ${CUTLASS_PATH}/include
-    ${CUTLASS_PATH}/tools/util/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/json
-    ${CMAKE_CURRENT_SOURCE_DIR}/onnx/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/zmq/include
-    ${CUDAToolkit_INCLUDE_DIRS}
-    $<$<BOOL:${LZMA_INCLUDE_DIR}>:${LZMA_INCLUDE_DIR}>
-)
-
-target_link_libraries(huggingface_rag_integration
-    PRIVATE
-    src
-)
 
 # =============================================================================
 # 安装配置

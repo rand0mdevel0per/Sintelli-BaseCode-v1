@@ -86,6 +86,16 @@ public:
         global_decay = 0.99;
     }
 
+    bool reset() {
+        try {
+            nodes.clear();
+            next_turn_id = 1;
+        } catch (...) {
+            return false;
+        }
+        return true;
+    }
+
     // 添加新对话回合
     void addTurn(const std::string& text, const double embedding[128]) {
         SCT_Node node{};

@@ -537,6 +537,25 @@ public:
         return InputMessage{false, false, "", ""};
     }
 
+    bool clear_sct() {
+        try{
+            return sct.reset();
+        } catch (...) {
+            return false;
+        }
+    }
+
+    bool clear_cache() {
+        try{
+            while (!cache_queue.empty()) {
+                cache_queue.pop();
+            }
+        } catch (...) {
+            return false;
+        }
+        return true;
+    }
+
     bool stop() {
         try {
             is_running = false;
@@ -645,6 +664,19 @@ private:
 
     __managed__ double score;
     __managed__ bool training;
+
+    bool apply_trace() {
+        if (!training) return false;
+        try{
+            ull neuron_count = GRID_SIZE ^ 3;
+            ull threads_per_block = 256;
+            ull blocks = (neuron_count + threads_per_block - 1) / threads_per_block;
+            apply_trace_to_neurons<<<blocks, threads_per_block>>>(d_neurons, d_trace, score, neuron_count);
+        } catch (...) {
+            return false;
+        }
+        return true;
+    }
 
     /**
      * @brief Main processing loop for the neuron network.
@@ -1007,10 +1039,10 @@ private:
             }
             ull neuron_count = GRID_SIZE ^ 3;
             int threads_per_block = 256;
-            int blocks = (neuron_count + threads_per_block - 1) / threads_per_block;
+            ull blocks = (neuron_count + threads_per_block - 1) / threads_per_block;
 
             // 启动kernel
-            update_activity<<<blocks, threads_per_block>>>(d_neurons, d_active_flags, d_trace, score);
+            update_activity<<<blocks, threads_per_block>>>(d_neurons, d_active_flags, d_trace, score, training);
             std::this_thread::sleep_for(std::chrono::nanoseconds(100));
             // 等待所有流完成
             for (int i = 0; i < 4; i++) {

@@ -99,7 +99,7 @@ static PyObject* py_load_model(PyObject* self, PyObject* args) {
     }
 }
 
-// 2. 启动模型
+// 2. Start model
 static PyObject* py_start_model(PyObject* self, PyObject* args) {
     if (!g_model) {
         PyErr_SetString(PyExc_RuntimeError, "Model not created");
@@ -107,7 +107,7 @@ static PyObject* py_start_model(PyObject* self, PyObject* args) {
     }
 
     try {
-        // 启动模型
+        // Start the neuron model
         bool success = g_model->run();
         if (!success) {
             PyErr_SetString(PyExc_RuntimeError, "Failed to start model");
@@ -116,7 +116,7 @@ static PyObject* py_start_model(PyObject* self, PyObject* args) {
 
         g_model_running = true;
 
-        // 启动输出收集线程
+        // Start output collector thread
         if (!g_collector_running) {
             g_collector_running = true;
             g_collector_thread = std::thread(output_collector_loop);
@@ -130,16 +130,16 @@ static PyObject* py_start_model(PyObject* self, PyObject* args) {
     }
 }
 
-// 3. 输入
+// 3. Input
 static PyObject* py_input(PyObject* self, PyObject* args) {
     try {
         const char* text = nullptr;
         const char* img_base64 = nullptr;
         const char* role = "user";
         
-        // 解析参数：text, image, role都是可选的
+        // Parse arguments: text, image, role are all optional
         if (!PyArg_ParseTuple(args, "|sss", &text, &img_base64, &role)) {
-            return nullptr; // 参数解析失败
+            return nullptr; // Argument parsing failed
         }
 
         InputMessage msg;
@@ -169,7 +169,7 @@ static PyObject* py_input(PyObject* self, PyObject* args) {
     }
 }
 
-// 4. 流式获取输出（非阻塞）
+// 4. Get next output (streaming, non-blocking)
 static PyObject* py_get_next_output(PyObject* self, PyObject* args) {
     double timeout_sec = 1.0;
 
@@ -179,21 +179,22 @@ static PyObject* py_get_next_output(PyObject* self, PyObject* args) {
 
     std::unique_lock<std::mutex> lock(g_output_mutex);
 
-    // 等待输出或超时
+    // Wait for output or timeout
     if (g_output_cv.wait_for(lock,
                              std::chrono::milliseconds((int)(timeout_sec * 1000)),
                              []{ return !g_output_queue.empty(); })) {
-        // 有输出
+        // Output available
         std::string output = g_output_queue.front();
         g_output_queue.pop();
 
         return PyUnicode_FromString(output.c_str());
     }
 
-    // 超时，返回None
+    // Timeout, return None
     Py_RETURN_NONE;
 }
 
+// 5. Set score for training
 static PyObject* py_set_score(PyObject* self, PyObject* args) {
     double score = 1.0;
 
@@ -209,6 +210,7 @@ static PyObject* py_set_score(PyObject* self, PyObject* args) {
     }
 }
 
+// 6. Enable training mode
 static PyObject* py_enable_training_mode(PyObject* self, PyObject* args) {
     try {
         g_model->enable_training_mode();
@@ -219,6 +221,7 @@ static PyObject* py_enable_training_mode(PyObject* self, PyObject* args) {
     return PyBool_FromLong(true);
 }
 
+// 7. Disable training mode
 static PyObject* py_disable_training_mode(PyObject* self, PyObject* args) {
     try {
         g_model->disable_training_mode();
@@ -229,13 +232,13 @@ static PyObject* py_disable_training_mode(PyObject* self, PyObject* args) {
     return PyBool_FromLong(true);
 }
 
-// 5. 检查是否有输出可用
+// 8. Check if output is available
 static PyObject* py_has_output(PyObject* self, PyObject* args) {
     std::lock_guard<std::mutex> lock(g_output_mutex);
     return PyBool_FromLong(!g_output_queue.empty());
 }
 
-// 6. 清空输出队列
+// 9. Clear output queue
 static PyObject* py_clear_outputs(PyObject* self, PyObject* args) {
     std::lock_guard<std::mutex> lock(g_output_mutex);
     while (!g_output_queue.empty()) {
@@ -244,6 +247,7 @@ static PyObject* py_clear_outputs(PyObject* self, PyObject* args) {
     Py_RETURN_NONE;
 }
 
+// 10. Get next image output (streaming, non-blocking)
 static PyObject* py_get_next_output_img(PyObject* self, PyObject* args) {
     double timeout_sec = 1.0;
 
@@ -253,28 +257,28 @@ static PyObject* py_get_next_output_img(PyObject* self, PyObject* args) {
 
     std::unique_lock<std::mutex> lock(g_output_img_mut);
 
-    // 等待输出或超时
+    // Wait for output or timeout
     if (g_output_img_cv.wait_for(lock,
                              std::chrono::milliseconds((int)(timeout_sec * 1000)),
                              []{ return !g_output_img_queue.empty(); })) {
-        // 有输出
+        // Output available
         std::string output = g_output_img_queue.front();
         g_output_img_queue.pop();
 
         return PyUnicode_FromString(output.c_str());
     }
 
-    // 超时，返回None
+    // Timeout, return None
     Py_RETURN_NONE;
 }
 
-// 5. 检查是否有输出可用
+// 11. Check if image output is available
 static PyObject* py_has_output_img(PyObject* self, PyObject* args) {
     std::lock_guard<std::mutex> lock(g_output_img_mut);
     return PyBool_FromLong(!g_output_img_queue.empty());
 }
 
-// 6. 清空输出队列
+// 12. Clear image output queue
 static PyObject* py_clear_outputs_img(PyObject* self, PyObject* args) {
     std::lock_guard<std::mutex> lock(g_output_img_mut);
     while (!g_output_img_queue.empty()) {
@@ -283,14 +287,14 @@ static PyObject* py_clear_outputs_img(PyObject* self, PyObject* args) {
     Py_RETURN_NONE;
 }
 
-// 7. 停止模型
+// 13. Stop model
 static PyObject* py_stop_model(PyObject* self, PyObject* args) {
     if (g_model) {
         g_model->stop();
         g_model_running = false;
     }
 
-    // 停止收集线程
+    // Stop collector thread
     if (g_collector_running) {
         g_collector_running = false;
         if (g_collector_thread.joinable()) {
@@ -301,7 +305,7 @@ static PyObject* py_stop_model(PyObject* self, PyObject* args) {
     Py_RETURN_NONE;
 }
 
-// 8. 销毁模型
+// 14. Destroy model
 static PyObject* py_destroy_model(PyObject* self, PyObject* args) {
     py_stop_model(self, args);
 
@@ -311,6 +315,26 @@ static PyObject* py_destroy_model(PyObject* self, PyObject* args) {
     }
 
     Py_RETURN_NONE;
+}
+
+//15. Save Model
+static PyObject* py_save_model(PyObject* self, PyObject* args) {
+    const char* path = "";
+
+    if (!PyArg_ParseTuple(args, "|s", &path)) {
+        cout << "WARN: Using default path" << std::endl;
+        path = "";
+    }
+
+    try {
+        if (path != ""){
+            return PyBool_FromLong(g_model->save(std::string(path)));
+        }
+        return PyBool_FromLong(g_model->save());
+    } catch (const std::exception& e) {
+        PyErr_SetString(PyExc_RuntimeError, e.what());
+        return nullptr;
+    }
 }
 
 // ========== 模块定义 ==========
@@ -323,7 +347,7 @@ static PyMethodDef NeuronMethods[] = {
      "Start the model"},
 
     {"input", py_input, METH_VARARGS,
-     "Input content to model\n\nArgs:\n    text (str): Input text [optional] , image (str): Input image(base64)[optional] , role (str) : User role[optional]"},
+     "Input content to model\n\nArgs:\n    text (str, optional): Input text\n    image (str, optional): Input image (base64)\n    role (str, optional): User role\n\nReturns:\n    bool: True if success"},
 
     {"get_next_output", py_get_next_output, METH_VARARGS,
      "Get next text output (blocking with timeout)\n\nArgs:\n    timeout (float): Timeout in seconds (default 1.0)\n\nReturns:\n    str or None"},
@@ -350,16 +374,19 @@ static PyMethodDef NeuronMethods[] = {
      "Destroy the model"},
 
     {"set_score", py_set_score, METH_VARARGS,
-    "Set output scores when training\n\nArgs:\n  score(float): Current score for the output\n\nReturns: bool(true if success)"},
+    "Set output scores when training\n\nArgs:\n    score (float): Current score for the output\n\nReturns:\n    bool: True if success"},
 
     {"enable_training_mode", py_enable_training_mode , METH_VARARGS,
-    "Enable training mode for the model\n\nReturns: bool(if success)"},
+    "Enable training mode for the model\n\nReturns:\n    bool: True if success"},
 
     {"disable_training_mode", py_disable_training_mode, METH_VARARGS,
-    "Disable training mode for the model\n\nReturns: bool(if success)"},
+    "Disable training mode for the model\n\nReturns:\n    bool: True if success"},
 
     {"load_model_from_file",py_load_model, METH_VARARGS,
     "Load model from a .nm2 file\n\nArgs:\n path(str):The path of .nm2 model file \n\nReturns: bool(if success)"},
+
+    {"save_model_from_file",py_save_model, METH_VARARGS,
+"Save model to a .nm2 file\n\nArgs:\n path(str):The path of .nm2 model file \n\nReturns: bool(if success)"},
 
     {nullptr, nullptr, 0, nullptr}
 };
