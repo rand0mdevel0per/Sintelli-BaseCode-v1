@@ -73,6 +73,20 @@ struct DeviceQueue {
         unsigned long long current_tail = atomicAdd((unsigned long long*)&tail, 0ULL);
         return (int)(current_tail - current_head);
     }
+
+    [[nodiscard]] __device__ T front() const {
+        // 检查队列是否为空
+        unsigned long long current_head = atomicAdd((unsigned long long*)&head, 0ULL);
+        unsigned long long current_tail = atomicAdd((unsigned long long*)&tail, 0ULL);
+        if (current_head >= current_tail) {
+            // 队列空，返回默认构造的T类型对象
+            return T{};
+        }
+
+        // 使用环形缓冲区索引获取队首元素但不移除
+        int pos = (int)(current_head % CAPACITY);
+        return data[pos];
+    }
 };
 
 // 使用示例：

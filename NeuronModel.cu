@@ -134,9 +134,9 @@ public:
         static KFEManager kfe_manager(&kfe_storage_queue, &kfe_query_queue, &kfe_result_queue);
 
         for (int idx = 0; idx < GRID_SIZE * GRID_SIZE * GRID_SIZE; idx++) {
-            int x = idx / (GRID_SIZE * GRID_SIZE);
-            int y = (idx / GRID_SIZE) % GRID_SIZE;
-            int z = idx % GRID_SIZE;
+            ll x = idx / (GRID_SIZE * GRID_SIZE);
+            ll y = (idx / GRID_SIZE) % GRID_SIZE;
+            ll z = idx % GRID_SIZE;
 
             ll coord[3] = {x, y, z};
             // Set up neighbor queue connections
@@ -188,7 +188,7 @@ public:
         std::cout << "Distributed neuron system initialization completed!" << std::endl;
     }
 
-    explicit NeuronModel(std::string path) : processor(e5), logic_processor(e5), memory_processor(e5),
+    explicit NeuronModel(const std::string& path) : processor(e5), logic_processor(e5), memory_processor(e5),
                                              sct_processor(e5), cache_processor(e5) {
         // Use delegating constructor
         NeuronModel(2);
@@ -542,8 +542,8 @@ public:
             is_running = false;
             // Wait for all streams to complete
             // Synchronize all CUDA streams to ensure all GPU operations are finished
-            for (int i = 0; i < 4; i++) {
-                cudaStreamSynchronize(streams[i]);
+            for (auto & stream : streams) {
+                cudaStreamSynchronize(stream);
             }
             eventloop.join();
             return true;
@@ -573,10 +573,41 @@ public:
 
     ull get_size() const { return GRID_SIZE; }
 
+    void enable_training_mode() {
+        training = true;
+    }
+
+    void disable_training_mode() {
+        training = false;
+    }
+
+    bool update_score(double score_) {
+        if (!training) return false;
+        try{
+            ull neuron_count = GRID_SIZE ^ 3;
+            ull threads_per_block = 256;
+            ull blocks = (neuron_count + threads_per_block - 1) / threads_per_block;
+            reset_trace<<<blocks, threads_per_block>>>(d_trace);
+            score = score_;
+        } catch (...) {
+            return false;
+        }
+        return true;
+    }
+
+    std::queue<std::string> get_cache() {
+        try {
+            return {this->cache_queue};
+        } catch (...) {
+            return {};
+        }
+    }
+
 private:
     ull GRID_SIZE = 32;
     cudaStream_t streams[4];
     __managed__ bool *d_active_flags;
+    __managed__ double *d_trace;
     std::thread eventloop;
     ull NEURON_COUNT = 0; // Will be initialized in constructor
     ull THREADS_PER_BLOCK = 256;
@@ -611,6 +642,9 @@ private:
     UnifiedInputProcessor cache_processor;
 
     RAGKnowledgeBaseLoader rag_loader;
+
+    __managed__ double score;
+    __managed__ bool training;
 
     /**
      * @brief Main processing loop for the neuron network.
@@ -886,7 +920,7 @@ private:
                 }
                 std::thread([this, matched_logics]() {
                     for (const auto &logic_id: matched_logics) {
-                        Logic curr_logic;
+                        Logic curr_logic{};
                         logic_tree.fetchByHash(logic_id.first, curr_logic);
                         char *curr_logic_str = wideCharToMultiByte(curr_logic.content);
                         processTextString(&logic_processor, std::string(curr_logic_str));
@@ -971,6 +1005,12 @@ private:
                 }
                 find_cache.clear();
             }
+            ull neuron_count = GRID_SIZE ^ 3;
+            int threads_per_block = 256;
+            int blocks = (neuron_count + threads_per_block - 1) / threads_per_block;
+
+            // 启动kernel
+            update_activity<<<blocks, threads_per_block>>>(d_neurons, d_active_flags, d_trace, score);
             std::this_thread::sleep_for(std::chrono::nanoseconds(100));
             // 等待所有流完成
             for (int i = 0; i < 4; i++) {
@@ -1027,6 +1067,7 @@ private:
         sct = other.sct;
         logic_tree = other.logic_tree;
         memory_tree = other.memory_tree;
+        cache_queue = other.cache_queue;
         memcpy(d_active_flags, other.d_active_flags, sizeof(d_active_flags));
         ull total_neurons = GRID_SIZE * GRID_SIZE * GRID_SIZE;
         for (ull i = 0; i < total_neurons; i++) {
@@ -1088,9 +1129,9 @@ private:
         ull total_neurons = GRID_SIZE * GRID_SIZE * GRID_SIZE;
 
         for (ull idx = 0; idx < total_neurons; idx++) {
-            int x = idx / (GRID_SIZE * GRID_SIZE);
-            int y = (idx / GRID_SIZE) % GRID_SIZE;
-            int z = idx % GRID_SIZE;
+            ull x = idx / (GRID_SIZE * GRID_SIZE);
+            ull y = (idx / GRID_SIZE) % GRID_SIZE;
+            ull z = idx % GRID_SIZE;
 
             // 检查主队列指针
             if (d_neurons[idx].getQueue() != &queues[x][y][z]) {

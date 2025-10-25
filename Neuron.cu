@@ -1056,8 +1056,7 @@ private:
         // 从4个端口收集并加权平均
         for (int p = 0; p < 4; p++) {
             if (!port_in[p].empty()) {
-                NeuronInput temp_inp;
-                port_in[p].pop(temp_inp);
+                NeuronInput temp_inp = port_in[p].front();
 
                 // 先通过input_multiplex_array变换输入
                 double transformed_input[256][256];
@@ -1328,8 +1327,7 @@ private:
                     double local_feature = 0.0;
                     for (int p = 0; p < 4; p++) {
                         if (!port_in[p].empty()) {
-                            NeuronInput temp;
-                            port_in[p].pop(temp);
+                            NeuronInput temp = port_in[p].front();
                             local_feature += temp.array[i][j];
                         }
                     }
@@ -1497,8 +1495,7 @@ private:
 
         for (int p = 0; p < 4; p++) {
             if (!port_in[p].empty()) {
-                NeuronInput temp{};
-                port_in[p].pop(temp);
+                NeuronInput temp = port_in[p].front();
                 total_activity += temp.activity;
                 count++;
             }
@@ -1639,8 +1636,7 @@ private:
         for (int p = 0; p < 4; p++) {
             if (port_in[p].empty()) continue;
 
-            NeuronInput inp;
-            port_in[p].pop(inp);
+            NeuronInput inp = port_in[p].front();
 
             // Hebbian规则: ΔW = η * input * output
             for (int i = 0; i < 256; i++) {
@@ -1775,8 +1771,8 @@ private:
 };
 
 
-__global__ void all_neurons_kernel(Neuron *neurons, bool* active_flags, int count) {
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+__global__ void all_neurons_kernel(Neuron *neurons, bool* active_flags, ull count) {
+    ull tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid < count && active_flags[tid]) {
         try{
             neurons[tid].step();
@@ -1786,8 +1782,18 @@ __global__ void all_neurons_kernel(Neuron *neurons, bool* active_flags, int coun
     }
 }
 
-__global__ void update_activity(Neuron* neurons, bool* active_flags) {
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+__global__ void update_activity(Neuron* neurons, bool* active_flags, double* trace, double score, bool training) {
+    ull tid = blockIdx.x * blockDim.x + threadIdx.x;
     active_flags[tid] = neurons[tid].is_active();
+    if (active_flags[tid] && training) {
+        trace[tid] += neurons[tid].get_activity() * 0.1 * max(min(score,1.0),0.0);
+    } else {
+        trace[tid] -= 0.01;
+    }
+}
+
+__global__ void reset_trace(double* trace) {
+    ull tid = blockIdx.x * blockDim.x + threadIdx.x;
+    trace[tid] = 0;
 }
 #endif //SRC_NEURON_H
