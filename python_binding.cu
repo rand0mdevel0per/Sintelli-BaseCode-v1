@@ -10,7 +10,7 @@
 #include <condition_variable>
 
 // 全局模型和输出队列
-static NeuronModel<32> *g_model = nullptr;
+static NeuronModel *g_model = nullptr;
 static std::queue<std::string> g_output_queue;
 static std::queue<std::string> g_output_img_queue;
 static std::mutex g_output_mutex;
@@ -71,7 +71,31 @@ static PyObject* py_create_model(PyObject* self, PyObject* args) {
 
     } catch (const std::exception& e) {
         PyErr_SetString(PyExc_RuntimeError, e.what());
-        return NULL;
+        return nullptr;
+    }
+}
+
+static PyObject* py_load_model(PyObject* self, PyObject* args) {
+    const char* path;
+    if (!PyArg_ParseTuple(args, "|s", &path)) {
+        std::cout << "WARN: Using default path..." << std::endl;
+        path = "";
+    }
+    try {
+        // 清理旧模型
+        if (g_model) {
+            g_model->stop();
+            delete g_model;
+        }
+
+        // 创建新模型
+        g_model = new NeuronModel(std::string(path));
+
+        Py_RETURN_TRUE;
+
+    } catch (const std::exception& e) {
+        PyErr_SetString(PyExc_RuntimeError, e.what());
+        return nullptr;
     }
 }
 
@@ -79,7 +103,7 @@ static PyObject* py_create_model(PyObject* self, PyObject* args) {
 static PyObject* py_start_model(PyObject* self, PyObject* args) {
     if (!g_model) {
         PyErr_SetString(PyExc_RuntimeError, "Model not created");
-        return NULL;
+        return nullptr;
     }
 
     try {
@@ -87,7 +111,7 @@ static PyObject* py_start_model(PyObject* self, PyObject* args) {
         bool success = g_model->run();
         if (!success) {
             PyErr_SetString(PyExc_RuntimeError, "Failed to start model");
-            return NULL;
+            return nullptr;
         }
 
         g_model_running = true;
@@ -102,36 +126,37 @@ static PyObject* py_start_model(PyObject* self, PyObject* args) {
 
     } catch (const std::exception& e) {
         PyErr_SetString(PyExc_RuntimeError, e.what());
-        return NULL;
+        return nullptr;
     }
 }
 
 // 3. 输入
 static PyObject* py_input(PyObject* self, PyObject* args) {
     try {
-        const char* text;
+        const char* text = nullptr;
         const char* img_base64 = nullptr;
+        const char* role = "user";
+        
+        // 解析参数：text, image, role都是可选的
+        if (!PyArg_ParseTuple(args, "|sss", &text, &img_base64, &role)) {
+            return nullptr; // 参数解析失败
+        }
+
         InputMessage msg;
-        msg.has_text = false;
-        msg.has_img = false;
-        if (PyArg_ParseTuple(args, "s", &text)) {
-            msg.has_text = true;
+        msg.has_text = (text != nullptr && strlen(text) > 0);
+        msg.has_img = (img_base64 != nullptr && strlen(img_base64) > 0);
+        
+        if (msg.has_text) {
             msg.text = std::string(text);
         }
-
-        if (PyArg_ParseTuple(args, "s", &img_base64)) {
-            msg.has_img = true;
+        
+        if (msg.has_img) {
             msg.base64_image = std::string(img_base64);
-        }
-
-        const char* role;
-        if (!PyArg_ParseTuple(args, "s", &role)) {
-            role = "user";
         }
 
         if (!g_model || !g_model_running) {
             PyErr_SetString(PyExc_RuntimeError, "Model not running");
-            return NULL;
+            return nullptr;
         }
 
         bool success = g_model->input(msg, std::string(role));
@@ -140,7 +165,7 @@ static PyObject* py_input(PyObject* self, PyObject* args) {
 
     } catch (const std::exception& e) {
         PyErr_SetString(PyExc_RuntimeError, e.what());
-        return NULL;
+        return nullptr;
     }
 }
 
@@ -149,7 +174,7 @@ static PyObject* py_get_next_output(PyObject* self, PyObject* args) {
     double timeout_sec = 1.0;
 
     if (!PyArg_ParseTuple(args, "|d", &timeout_sec)) {
-        return NULL;
+        return nullptr;
     }
 
     std::unique_lock<std::mutex> lock(g_output_mutex);
@@ -167,6 +192,41 @@ static PyObject* py_get_next_output(PyObject* self, PyObject* args) {
 
     // 超时，返回None
     Py_RETURN_NONE;
+}
+
+static PyObject* py_set_score(PyObject* self, PyObject* args) {
+    double score = 1.0;
+
+    if (!PyArg_ParseTuple(args, "|d", &score)) {
+        return nullptr;
+    }
+
+    try {
+        return PyBool_FromLong(g_model->update_score(score));
+    } catch (const std::exception& e) {
+        PyErr_SetString(PyExc_RuntimeError, e.what());
+        return nullptr;
+    }
+}
+
+static PyObject* py_enable_training_mode(PyObject* self, PyObject* args) {
+    try {
+        g_model->enable_training_mode();
+    } catch (const std::exception& e) {
+        PyErr_SetString(PyExc_RuntimeError, e.what());
+        return nullptr;
+    }
+    return PyBool_FromLong(true);
+}
+
+static PyObject* py_disable_training_mode(PyObject* self, PyObject* args) {
+    try {
+        g_model->disable_training_mode();
+    } catch (const std::exception& e) {
+        PyErr_SetString(PyExc_RuntimeError, e.what());
+        return nullptr;
+    }
+    return PyBool_FromLong(true);
 }
 
 // 5. 检查是否有输出可用
@@ -188,7 +248,7 @@ static PyObject* py_get_next_output_img(PyObject* self, PyObject* args) {
     double timeout_sec = 1.0;
 
     if (!PyArg_ParseTuple(args, "|d", &timeout_sec)) {
-        return NULL;
+        return nullptr;
     }
 
     std::unique_lock<std::mutex> lock(g_output_img_mut);
@@ -199,10 +259,10 @@ static PyObject* py_get_next_output_img(PyObject* self, PyObject* args) {
                              []{ return !g_output_img_queue.empty(); })) {
         // 有输出
         std::string output = g_output_img_queue.front();
-        g_output_queue.pop();
+        g_output_img_queue.pop();
 
         return PyUnicode_FromString(output.c_str());
-                             }
+    }
 
     // 超时，返回None
     Py_RETURN_NONE;
@@ -211,7 +271,7 @@ static PyObject* py_get_next_output_img(PyObject* self, PyObject* args) {
 // 5. 检查是否有输出可用
 static PyObject* py_has_output_img(PyObject* self, PyObject* args) {
     std::lock_guard<std::mutex> lock(g_output_img_mut);
-    return PyBool_FromLong(!g_output_queue.empty());
+    return PyBool_FromLong(!g_output_img_queue.empty());
 }
 
 // 6. 清空输出队列
@@ -289,7 +349,19 @@ static PyMethodDef NeuronMethods[] = {
     {"destroy_model", py_destroy_model, METH_VARARGS,
      "Destroy the model"},
 
-    {NULL, NULL, 0, NULL}
+    {"set_score", py_set_score, METH_VARARGS,
+    "Set output scores when training\n\nArgs:\n  score(float): Current score for the output\n\nReturns: bool(true if success)"},
+
+    {"enable_training_mode", py_enable_training_mode , METH_VARARGS,
+    "Enable training mode for the model\n\nReturns: bool(if success)"},
+
+    {"disable_training_mode", py_disable_training_mode, METH_VARARGS,
+    "Disable training mode for the model\n\nReturns: bool(if success)"},
+
+    {"load_model_from_file",py_load_model, METH_VARARGS,
+    "Load model from a .nm2 file\n\nArgs:\n path(str):The path of .nm2 model file \n\nReturns: bool(if success)"},
+
+    {nullptr, nullptr, 0, nullptr}
 };
 
 static struct PyModuleDef neuronmodule = {
