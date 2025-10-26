@@ -35,9 +35,28 @@
 #include "GPUMutex.cu"
 #include <cuda_fp16.hpp>
 #include "gpu_containers.cuh"
+#include "nlohmann/json.hpp"
 
 #define ll long long
 #define ull unsigned ll
+
+struct NeuronStats {
+    bool training;
+    double activity;
+    ll port_counts[4];
+    double core_vul;
+    double importance;
+
+    nlohmann::json to_json() {
+        return nlohmann::json{
+                {"training", training},
+                {"activity", activity},
+                {"port_counts",port_counts},
+                {"core_vul",core_vul},
+                {"importance",importance}
+        };
+    }
+};
 
 /**
  * @brief Neuron class representing a single computational unit in the neural network.
@@ -229,6 +248,18 @@ public:
 
     [[nodiscard]] double get_activity() const {
         return activity;
+    }
+
+    NeuronStats get_stats() {
+        auto stats = NeuronStats{
+            training, activity, port_counts[0],
+            port_counts[1],
+            port_counts[2],
+            port_counts[3],
+            core_vulnerability,
+            importance
+        };
+        return stats;
     }
 
     bool inject(NeuronInput inp, int port) {
@@ -1575,6 +1606,18 @@ private:
         double P_Original[256][256];
         memcpy(&P_Original, &P_Matrix, sizeof(P_Matrix));
 
+        double W_backup[256][256];
+        if (training) {
+            memcpy(W_backup, W_predict, sizeof(W_predict));
+            for (int i = 0; i < 256; i++) {
+                for (int j = 0; j < 256; j++) {
+                    if (curand_uniform(&rand_state) < 0.05) {
+                        W_predict[i][j] = 0.0;
+                    }
+                }
+            }
+        }
+
         // P_Matrix × W_predict
         matmul_double(&P_Matrix[0][0], &W_predict[0][0], &temp_product[0][0]);
 
@@ -1724,37 +1767,18 @@ private:
 
         for (int i = 0; i < 256; i++) {
             for (int j = 0; j < 256; j++) {
+                if (training && W_predict[i][j] < 0.01) {
+                    W_predict[i][j] = W_backup[i][j];
+                }
+            }
+        }
+
+        for (int i = 0; i < 256; i++) {
+            for (int j = 0; j < 256; j++) {
                 P_Matrix[i][j] = 0.9 * P_Matrix[i][j] + 0.1 * P_Original[i][j];
             }
         }
-        layerNorm(&P_Matrix[0][0], 256 * 256);
 
-        if (training) {
-            // 需要添加这个标志
-            double dropout_rate = 0.05;
-
-            for (int i = 0; i < 256; i++) {
-                for (int j = 0; j < 256; j++) {
-                    if (curand_uniform(&rand_state) < dropout_rate) {
-                        P_Matrix[i][j] = 0.0;
-                    } else {
-                        // 缩放补偿
-                        P_Matrix[i][j] /= (1.0 - dropout_rate);
-                    }
-                }
-            }
-        }
-
-        // 或者使用DropConnect (dropout权重而不是激活)
-        if (training) {
-            for (int i = 0; i < 256; i++) {
-                for (int j = 0; j < 256; j++) {
-                    if (curand_uniform(&rand_state) < 0.05) {
-                        W_predict[i][j] = 0.0;
-                    }
-                }
-            }
-        }
         layerNorm(&P_Matrix[0][0], 256 * 256);
     }
 

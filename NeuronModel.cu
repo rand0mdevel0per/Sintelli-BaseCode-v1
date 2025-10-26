@@ -127,7 +127,7 @@ public:
 
         // Create KFE storage queues (shared by all neurons)
         static DeviceQueue<KFE_STM_Slot, 32> kfe_storage_queue;
-        static DeviceQueue<std::string, 32> kfe_query_queue;
+        static DeviceQueue<GPUString, 32> kfe_query_queue;
         static DeviceQueue<KFE_STM_Slot, 32> kfe_result_queue;
 
         // Start KFE manager
@@ -627,6 +627,10 @@ public:
         } catch (...) {
             return {};
         }
+    }
+
+    NeuronStats get_n_stats(ull id) {
+        return d_neurons->get_stats();
     }
 
 private:
