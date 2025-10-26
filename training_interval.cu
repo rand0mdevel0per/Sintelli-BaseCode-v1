@@ -386,7 +386,7 @@ std::string performSearch(const std::string &query, std::string bing, std::strin
     }
 
     // 最后尝试Google搜索
-    if (!google.empty()) {
+    if (!(google.empty() || google_eng.empty())) {
         try {
             std::string google_result = performGoogleSearch(query, GOOGLE_API_KEY, GOOGLE_ENGINE_ID);
             if (!google_result.empty()) {
@@ -398,16 +398,6 @@ std::string performSearch(const std::string &query, std::string bing, std::strin
     }
 
     return result.empty() ? "搜索失败，未获取到结果" : result;
-}
-
-bool run = true;
-
-void detect_stop() {
-    std::string inp;
-    while (run) {
-        std::cin >> inp;
-        if (inp == "stop") run = false;
-    }
 }
 
 std::pair<std::string, std::string> parseToolCall(const std::string &input) {
@@ -528,7 +518,7 @@ struct reply_trc {
 };
 
 void run_training(NeuronModel *model, const std::string &api_key, const std::string &name = "Sydney",
-                  std::string bing_api_key, std::string google_api_key, std::string google_engine_id) {
+                  std::string bing_api_key, std::string google_api_key, std::string google_engine_id, bool *stop) {
     std::vector<OpenAIClient::ChatMessage> msgs;
 
     // 创建系统消息，支持多模态输入
@@ -640,8 +630,6 @@ void run_training(NeuronModel *model, const std::string &api_key, const std::str
     // 使用支持多模态的构造函数创建消息
     msgs.emplace_back("system", system_prompt);
 
-    run = true;
-
     OpenAIClient::HttpClient client(api_key);
 
     vector<std::string> stops;
@@ -670,7 +658,7 @@ void run_training(NeuronModel *model, const std::string &api_key, const std::str
 
     bool test_md = true;
 
-    while (run) {
+    while (!*stop) {
         model->run();
         InputMessage inp;
         std::string model_req;
@@ -885,5 +873,7 @@ void run_training(NeuronModel *model, const std::string &api_key, const std::str
         }
         model->input(inp,"user");
     }
+    model->save();
+    model->disable_training_mode();
 }
 
