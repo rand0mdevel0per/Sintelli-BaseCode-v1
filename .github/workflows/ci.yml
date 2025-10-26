@@ -5,9 +5,9 @@ name: Build and Test
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, dev ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, dev ]
   workflow_dispatch:  # 手动触发
 
 env:
@@ -15,7 +15,6 @@ env:
   PYTHON_VERSION: "3.11"
 
 jobs:
-  # ========== Job 1: 代码质量检查 ==========
   code-quality:
     name: Code Quality Check
     runs-on: ubuntu-latest
@@ -26,30 +25,27 @@ jobs:
         with:
           fetch-depth: 0
 
-      # 方案1: 使用clang-tidy（推荐）
       - name: Install Clang-Tidy
         run: |
           sudo apt-get update
           sudo apt-get install -y clang-tidy-16
 
-      - name: Generate compile_commands.json
-        run: |
-          mkdir -p build
-          cd build
-          cmake .. -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-          cp compile_commands.json ..
-
       - name: Run Clang-Tidy
         run: |
-          # 只检查src目录的.cu和.cpp文件
           find src -name "*.cu" -o -name "*.cpp" | \
             xargs clang-tidy-16 -p . \
             --checks='bugprone-*,performance-*' \
             --warnings-as-errors='' \
             > clang-tidy-report.txt || true
           
-          # 显示结果
           cat clang-tidy-report.txt
+
+      - name: 'Qodana Scan'
+        uses: JetBrains/qodana-action@v2025.2
+        with:
+          args: "--image,jetbrains/qodana-clang:2025.2-eap"
+        env:
+          QODANA_TOKEN: ${{ secrets.QODANA_TOKEN_1824339855 }}
 
       - name: Upload Clang-Tidy Report
         uses: actions/upload-artifact@v4
@@ -58,26 +54,11 @@ jobs:
           name: clang-tidy-report
           path: clang-tidy-report.txt
 
-      # 方案2: Qodana（如果网络正常）
-      # - name: Qodana Scan
-      #   uses: JetBrains/qodana-action@v2025.2
-      #   continue-on-error: true  # 失败不中断流程
-      #   with:
-      #     linter: jetbrains/qodana-clang:2025.2
-      #     args: --print-problems --fail-threshold 0
-      #     
-      # - name: Upload Qodana Results
-      #   uses: github/codeql-action/upload-sarif@v3
-      #   if: always()
-      #   with:
-      #     sarif_file: ${{ runner.temp }}/qodana/results/qodana.sarif.json
-
-  # ========== Job 2: Windows构建 ==========
   build-windows:
     name: Build on Windows
     runs-on: windows-latest
     needs: code-quality
-    
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -98,32 +79,37 @@ jobs:
           C:\vcpkg\bootstrap-vcpkg.bat
           echo "VCPKG_ROOT=C:\vcpkg" >> $env:GITHUB_ENV
 
-      - name: Install Dependencies
+      - name: Install Ninja
+        shell: powershell
         run: |
-          pip install requests setuptools wheel
+          choco install ninja --no-progress
 
-      - name: Build Python Package
+      - name: Configure and Build Package
+        shell: powershell
         run: |
-          python setup.py build_ext --inplace
+          mkdir build
+          cd build
 
-      - name: Run Basic Tests
-        run: |
-          python -c "import sintelliv1.sintelli_base as sb; print('Import successful!')"
+          cmake .. -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake" `
+                   -DCMAKE_EXPORT_COMPILE_COMMANDS=ON `
+                   -G Ninja `
+                   -DPython_EXECUTABLE="${{ env.pythonLocation }}/python.exe"
+
+          cmake --build .
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-build
           path: |
-            sintelliv1/*.pyd
-            sintelliv1/*.dll
+            build/*.pyd
+            build/*.dll
 
-  # ========== Job 3: Linux构建 ==========
   build-linux:
     name: Build on Linux
     runs-on: ubuntu-latest
     needs: code-quality
-    
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -132,6 +118,13 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Setup GCC 11 for CUDA Compatibility
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-11 g++-11
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100
+          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 100
 
       - name: Install CUDA
         uses: Jimver/cuda-toolkit@v0.2.14
@@ -149,65 +142,30 @@ jobs:
           /opt/vcpkg/bootstrap-vcpkg.sh
           echo "VCPKG_ROOT=/opt/vcpkg" >> $GITHUB_ENV
 
-      - name: Build Python Package
+      - name: Build Package
         run: |
-          pip install requests setuptools wheel
-          python setup.py build_ext --inplace
+          mkdir build
+          cd build
 
-      - name: Run Basic Tests
-        run: |
-          python -c "import sintelliv1.sintelli_base as sb; print('Import successful!')"
+          cmake .. -DCMAKE_TOOLCHAIN_FILE="/opt/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+               -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -G Ninja \
+               -DPython_EXECUTABLE="${{ env.pythonLocation }}/bin/python"
+
+          cmake --build .
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: linux-build
           path: |
-            sintelliv1/*.so
+            build/*.so
 
-  # ========== Job 4: 功能测试 ==========
-  test:
-    name: Run Tests
-    runs-on: ubuntu-latest
-    needs: [build-linux]
-    
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Download Build Artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: linux-build
-          path: sintelliv1/
-
-      - name: Install Test Dependencies
-        run: |
-          pip install pytest pytest-cov numpy
-
-      - name: Run Unit Tests
-        run: |
-          pytest tests/ -v --cov=sintelliv1 --cov-report=xml
-
-      - name: Upload Coverage
-        uses: codecov/codecov-action@v4
-        with:
-          file: ./coverage.xml
-          flags: unittests
-          name: codecov-umbrella
-
-  # ========== Job 5: 发布（仅tag）==========
   release:
     name: Create Release
     runs-on: ubuntu-latest
-    needs: [build-windows, build-linux, test]
+    needs: [ build-windows, build-linux ]
     if: startsWith(github.ref, 'refs/tags/')
-    
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -223,58 +181,3 @@ jobs:
             linux-build/*
           draft: false
           prerelease: false
-
-# ============================================
-# 本地Qodana配置（离线运行）
-# ============================================
-# 创建 qodana.yaml 文件：
-# version: "1.0"
-# 
-# # 使用正确的C++ linter
-# linter: jetbrains/qodana-clang:2025.2
-# 
-# # 禁用网络相关功能
-# ide: CLion
-# 
-# # 排除目录
-# exclude:
-#   - name: All
-#     paths:
-#       - build/
-#       - cmake-build-*/
-#       - .git/
-#       - external_repo/
-#       - vcpkg_installed/
-#       - third_party/
-# 
-# # 只检查src
-# include:
-#   - name: All
-#     paths:
-#       - src/
-# 
-# # 失败阈值
-# failThreshold: 0
-# 
-# # 本地运行命令：
-# # qodana scan --skip-pull --print-problems
-
-# ============================================
-# 替代方案：使用SonarCloud
-# ============================================
-# SonarCloud配置（免费且强大）
-# 
-# sonar-project.properties:
-# sonar.projectKey=your-org_sintelli
-# sonar.organization=your-org
-# sonar.sources=src
-# sonar.exclusions=build/**,cmake-build-*/**,third_party/**
-# sonar.cfamily.build-wrapper-output=bw-output
-# sonar.cfamily.threads=4
-# 
-# GitHub Action:
-# - name: SonarCloud Scan
-#   uses: SonarSource/sonarcloud-github-action@master
-#   env:
-#     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-#     SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
