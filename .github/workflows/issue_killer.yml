@@ -153,7 +153,7 @@ jobs:
             ## Creating Pull Request
             
             Once you have implemented the feature, create a pull request using the GitHub MCP tool:
-            1. Use the create_pull_request to create a Pull Request.
+            1. Use the create_pull_request to create a Pull Request to "dev" branch.
             2. The PR should be created from a new branch with a descriptive name (e.g., feature/issue-${ISSUE_NUMBER}, fix/issue-${ISSUE_NUMBER}, or a descriptive name based on the feature)
             3. The PR title should be descriptive and reference the issue number
             4. The PR body should explain what was implemented and reference the issue
