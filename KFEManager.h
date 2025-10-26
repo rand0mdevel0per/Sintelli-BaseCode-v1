@@ -32,39 +32,52 @@
  */
 class KFEManager {
 private:
-    std::unordered_map<GPUString, KFE_STM_Slot> kfe_storage_;  // KFE存储
-    mutable std::mutex storage_mutex_;                                   // 存储互斥锁
-    std::atomic<bool> running_{false};                          // 运行状态
-    std::thread worker_thread_;                                  // 工作线程
-    
+    std::unordered_map<GPUString, KFE_STM_Slot> kfe_storage_; // KFE存储
+    mutable std::mutex storage_mutex_; // 存储互斥锁
+    std::atomic<bool> running_{false}; // 运行状态
+    std::thread worker_thread_; // 工作线程
+
     // 设备端队列指针
-    DeviceQueue<KFE_STM_Slot, 32>* storage_queue_;
-    DeviceQueue<GPUString, 32>* query_queue_;
-    DeviceQueue<KFE_STM_Slot, 32>* result_queue_;
+    DeviceQueue<KFE_STM_Slot, 32> *storage_queue_;
+    DeviceQueue<GPUString, 32> *query_queue_;
+    DeviceQueue<KFE_STM_Slot, 32> *result_queue_;
 
     /**
+
      * @brief 工作线程函数
+
      */
+
     void workerThread() {
         while (running_) {
             // 处理存储请求
+
             KFE_STM_Slot slot;
+
             if (storage_queue_ && storage_queue_->pop(slot)) {
                 std::lock_guard<std::mutex> lock(storage_mutex_);
+
                 kfe_storage_[slot.hash().c_str()] = slot;
             }
-            
+
+
             // 处理查询请求
+
             GPUString query_hash;
+
             if (query_queue_ && query_queue_->pop(query_hash)) {
                 std::lock_guard<std::mutex> lock(storage_mutex_);
+
                 auto it = kfe_storage_.find(query_hash);
+
                 if (it != kfe_storage_.end() && result_queue_) {
-                    result_queue_->push(it->second);
+                    result_queue_->host_push(it->second);
                 }
             }
-            
+
+
             // 短暂休眠避免忙等待
+
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
     }
@@ -72,27 +85,27 @@ private:
 public:
     /**
      * @brief 构造函数
-     * 
+     *
      * @param storage_queue KFE存储请求队列
      * @param query_queue KFE查询请求队列
      * @param result_queue KFE查询结果队列
      */
-    KFEManager(DeviceQueue<KFE_STM_Slot, 32>* storage_queue,
-               DeviceQueue<GPUString, 32>* query_queue,
-               DeviceQueue<KFE_STM_Slot, 32>* result_queue)
+    KFEManager(DeviceQueue<KFE_STM_Slot, 32> *storage_queue,
+               DeviceQueue<GPUString, 32> *query_queue,
+               DeviceQueue<KFE_STM_Slot, 32> *result_queue)
         : storage_queue_(storage_queue)
-        , query_queue_(query_queue)
-        , result_queue_(result_queue) {
+          , query_queue_(query_queue)
+          , result_queue_(result_queue) {
         start();
     }
-    
+
     /**
      * @brief 析构函数
      */
     ~KFEManager() {
         stop();
     }
-    
+
     /**
      * @brief 启动KFE管理器
      */
@@ -100,7 +113,7 @@ public:
         running_ = true;
         worker_thread_ = std::thread(&KFEManager::workerThread, this);
     }
-    
+
     /**
      * @brief 停止KFE管理器
      */
@@ -110,24 +123,109 @@ public:
             worker_thread_.join();
         }
     }
-    
+
     /**
+
      * @brief 手动存储KFE槽位
-     * 
+
+     *
+
      * @param slot 要存储的KFE槽位
+
      */
-    void storeKFE(const KFE_STM_Slot& slot) {
+
+    void storeKFE(const KFE_STM_Slot &slot) {
         std::lock_guard<std::mutex> lock(storage_mutex_);
+
         kfe_storage_[slot.hash().c_str()] = slot;
     }
-    
+
+
+    /**
+
+     * @brief 批量存储KFE槽位
+
+     *
+
+     * @param slots 要存储的KFE槽位向量
+
+     */
+
+    void storeKFEs(const std::vector<KFE_STM_Slot> &slots) {
+        std::lock_guard<std::mutex> lock(storage_mutex_);
+
+        for (const auto &slot: slots) {
+            kfe_storage_[slot.hash().c_str()] = slot;
+        }
+    }
+
+
+    /**
+
+     * @brief 从设备队列批量处理存储请求
+
+     *
+
+     * @return 处理的请求数量
+
+     */
+
+    int processStorageQueue() {
+        int count = 0;
+
+        KFE_STM_Slot slot;
+
+        while (storage_queue_ && storage_queue_->host_pop(slot)) {
+            std::lock_guard<std::mutex> lock(storage_mutex_);
+
+            kfe_storage_[slot.hash().c_str()] = slot;
+
+            count++;
+        }
+
+        return count;
+    }
+
+
+    /**
+
+     * @brief 从设备队列批量处理查询请求
+
+     *
+
+     * @return 处理的请求数量
+
+     */
+
+    int processQueryQueue() {
+        int count = 0;
+
+        GPUString query_hash;
+
+        while (query_queue_ && query_queue_->host_pop(query_hash)) {
+            std::lock_guard<std::mutex> lock(storage_mutex_);
+
+            auto it = kfe_storage_.find(query_hash);
+
+            if (it != kfe_storage_.end() && result_queue_) {
+                // 将查询结果推送到结果队列
+
+                result_queue_->host_push(it->second);
+
+                count++;
+            }
+        }
+
+        return count;
+    }
+
     /**
      * @brief 手动查询KFE槽位
-     * 
+     *
      * @param hash KFE哈希值
      * @return KFE_STM_Slot 找到的KFE槽位，如果不存在则返回空槽位
      */
-    KFE_STM_Slot findKFE(const std::string& hash) {
+    KFE_STM_Slot findKFE(const std::string &hash) {
         std::lock_guard<std::mutex> lock(storage_mutex_);
         auto it = kfe_storage_.find(hash.c_str());
         if (it != kfe_storage_.end()) {
@@ -135,18 +233,17 @@ public:
         }
         return KFE_STM_Slot{};
     }
-    
+
     /**
      * @brief 获取存储的KFE数量
-     * 
+     *
      * @return size_t KFE槽位数量
      */
     size_t getKFECount() const {
-        storage_mutex_.lock();
+        std::lock_guard<std::mutex> lock(storage_mutex_);
         return kfe_storage_.size();
-        storage_mutex_.unlock();
     }
-    
+
     /**
      * @brief 清空KFE存储
      */

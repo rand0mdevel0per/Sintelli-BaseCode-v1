@@ -15,10 +15,10 @@
 // ==================== Double 精度矩阵乘法 ====================
 
 // 简单的CUDA矩阵乘法实现，作为备用方案
-__global__ void matmul_kernel_256x256(const double* A, const double* B, double* C, int N) {
+__global__ void matmul_kernel_256x256(const double *A, const double *B, double *C, int N) {
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
-    
+
     if (row < N && col < N) {
         double sum = 0.0;
         for (int k = 0; k < N; k++) {
@@ -26,6 +26,44 @@ __global__ void matmul_kernel_256x256(const double* A, const double* B, double* 
         }
         C[row * N + col] = sum;
     }
+}
+
+// 矩阵数据传输辅助函数 - 简化版本
+
+__host__ bool copyMatrixToDevice(const double *host_matrix, double *device_matrix, int rows, int cols) {
+    size_t size = rows * cols * sizeof(double);
+
+    return cudaMemcpy(device_matrix, host_matrix, size, cudaMemcpyHostToDevice) == cudaSuccess;
+}
+
+
+__host__ bool copyMatrixToHost(const double *device_matrix, double *host_matrix, int rows, int cols) {
+    size_t size = rows * cols * sizeof(double);
+
+    return cudaMemcpy(host_matrix, device_matrix, size, cudaMemcpyDeviceToHost) == cudaSuccess;
+}
+
+
+// 矩阵初始化函数 - 简化版本
+
+__host__ bool initMatrixOnDevice(double **device_matrix, int rows, int cols) {
+    size_t size = rows * cols * sizeof(double);
+
+    return cudaMalloc(device_matrix, size) == cudaSuccess;
+}
+
+
+__host__ void freeMatrixOnDevice(double *device_matrix) {
+    if (device_matrix) cudaFree(device_matrix);
+}
+
+
+// 矩阵内存拷贝函数（设备到设备）- 简化版本
+
+__host__ bool copyMatrixDeviceToDevice(const double *src_device_matrix, double *dst_device_matrix, int rows, int cols) {
+    size_t size = rows * cols * sizeof(double);
+
+    return cudaMemcpy(dst_device_matrix, src_device_matrix, size, cudaMemcpyDeviceToDevice) == cudaSuccess;
 }
 
 // CUTLASS 256x256 双精度矩阵乘法定义
@@ -45,61 +83,97 @@ using CutlassGemmDouble256 = cutlass::gemm::device::Gemm<
 >;
 
 /**
+
  * 简化的矩阵乘法接口：C = A * B
+
  *
+
  * @param device_A 设备端A矩阵指针 (M x K)
+
  * @param device_B 设备端B矩阵指针 (K x N)
+
  * @param device_C 设备端C矩阵指针 (M x N)
+
  * @param M 矩阵A的行数
+
  * @param N 矩阵B的列数
+
  * @param K 矩阵A的列数/矩阵B的行数
+
  * @return true if成功, false if失败
+
  */
+
 __host__ __device__ inline bool matmul_double(
-    const double* device_A,
-    const double* device_B,
-    double* device_C,
+
+    const double *device_A,
+
+    const double *device_B,
+
+    double *device_C,
+
     int M = 256,
+
     int N = 256,
+
     int K = 256
+
 ) {
     const double alpha = 1.0;
+
     const double beta = 0.0;
 
+
     // 配置GEMM参数
+
     typename CutlassGemmDouble256::Arguments args(
-        {M, N, K},                    // 问题规模
-        {device_A, M},                // A矩阵和leading dimension
-        {device_B, K},                // B矩阵和leading dimension
-        {nullptr, M},                 // 源C矩阵(不使用)
-        {device_C, M},                // 目标C矩阵
-        {alpha, beta}                 // alpha和beta系数
+
+        {M, N, K}, // 问题规模
+
+        {device_A, M}, // A矩阵和leading dimension
+
+        {device_B, K}, // B矩阵和leading dimension
+
+        {nullptr, M}, // 源C矩阵(不使用)
+
+        {device_C, M}, // 目标C矩阵
+
+        {alpha, beta} // alpha和beta系数
+
     );
 
+
     // 初始化GEMM操作
+
     CutlassGemmDouble256 gemm_op;
 
-    // 分配workspace(如果需要)
-    size_t workspace_size = CutlassGemmDouble256::get_workspace_size(args);
-    void* workspace_ptr = nullptr;
-    if (workspace_size > 0) {
-        cudaError_t err = cudaMalloc(&workspace_ptr, workspace_size);
-        if (err != cudaSuccess) {
-            return false;
-        }
-    }
 
-    // 初始化并执行
-    cutlass::Status status = gemm_op.initialize(args, workspace_ptr);
-    if (status != cutlass::Status::kSuccess) {
-        if (workspace_ptr) cudaFree(workspace_ptr);
+    // 分配workspace(如果需要)
+
+    size_t workspace_size = CutlassGemmDouble256::get_workspace_size(args);
+
+    void *workspace_ptr = nullptr;
+
+    if (workspace_size > 0 && cudaMalloc(&workspace_ptr, workspace_size) != cudaSuccess) {
         return false;
     }
 
+
+    // 初始化并执行
+
+    cutlass::Status status = gemm_op.initialize(args, workspace_ptr);
+
+    if (status != cutlass::Status::kSuccess) {
+        if (workspace_ptr) cudaFree(workspace_ptr);
+
+        return false;
+    }
+
+
     status = gemm_op();
 
-    // 同步并清理
     cudaDeviceSynchronize();
+
     if (workspace_ptr) cudaFree(workspace_ptr);
 
     return (status == cutlass::Status::kSuccess);
@@ -123,45 +197,69 @@ using CutlassGemmFloat256 = cutlass::gemm::device::Gemm<
 >;
 
 __host__ __device__ inline bool matmul_float(
-    const float* device_A,
-    const float* device_B,
-    float* device_C,
+
+    const float *device_A,
+
+    const float *device_B,
+
+    float *device_C,
+
     int M = 256,
+
     int N = 256,
+
     int K = 256
+
 ) {
     const float alpha = 1.0f;
+
     const float beta = 0.0f;
 
+
     typename CutlassGemmFloat256::Arguments args(
+
         {M, N, K},
+
         {device_A, M},
+
         {device_B, K},
+
         {nullptr, M},
+
         {device_C, M},
+
         {alpha, beta}
+
     );
 
+
     CutlassGemmFloat256 gemm_op;
+
     size_t workspace_size = CutlassGemmFloat256::get_workspace_size(args);
-    void* workspace_ptr = nullptr;
 
-    if (workspace_size > 0) {
-        if (cudaMalloc(&workspace_ptr, workspace_size) != cudaSuccess) {
-            return false;
-        }
-    }
+    void *workspace_ptr = nullptr;
 
-    cutlass::Status status = gemm_op.initialize(args, workspace_ptr);
-    if (status != cutlass::Status::kSuccess) {
-        if (workspace_ptr) cudaFree(workspace_ptr);
+
+    if (workspace_size > 0 && cudaMalloc(&workspace_ptr, workspace_size) != cudaSuccess) {
         return false;
     }
 
+
+    cutlass::Status status = gemm_op.initialize(args, workspace_ptr);
+
+    if (status != cutlass::Status::kSuccess) {
+        if (workspace_ptr) cudaFree(workspace_ptr);
+
+        return false;
+    }
+
+
     status = gemm_op();
+
     cudaDeviceSynchronize();
 
     if (workspace_ptr) cudaFree(workspace_ptr);
+
     return (status == cutlass::Status::kSuccess);
 }
 
