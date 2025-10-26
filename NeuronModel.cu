@@ -233,7 +233,7 @@ public:
                 // 使用CUDA内核来执行设备操作
                 NeuronData *d_neuron_data;
                 cudaMalloc(&d_neuron_data, sizeof(NeuronData));
-                Neuron::saveNeuronKernel<<<1, 1>>>(d_neurons, d_neuron_data, i);
+                saveNeuronKernel<<<1, 1>>>(d_neurons, d_neuron_data, i);
                 cudaDeviceSynchronize(); // 等待内核执行完成
 
                 // 将结果从设备内存拷贝到主机内存
@@ -533,7 +533,7 @@ public:
                     for (const auto &key: matched_memories | views::keys) {
                         MemorySlot curr_memory;
                         memory_tree.fetchByHash(key, curr_memory);
-                        const char *curr_memory_str = reinterpret_cast<const char *>(curr_memory.content.c_str);
+                        const char *curr_memory_str = reinterpret_cast<const char *>(curr_memory.content.data());
                         processTextString(&memory_processor, std::string(curr_memory_str));
                         delete[] curr_memory_str;
                     }
@@ -663,7 +663,7 @@ public:
 
         try {
             // 使用CUDA内核来执行设备操作
-            Neuron::updateNeuronKernel<<<1, 1>>>(d_neurons, neuron_index);
+            updateNeuronKernel<<<1, 1>>>(d_neurons, neuron_index);
             cudaDeviceSynchronize(); // 等待内核执行完成
             return true;
         } catch (...) {
@@ -686,7 +686,7 @@ public:
 
         try {
             // 使用CUDA内核来执行设备操作
-            Neuron::injectNeuronKernel<<<1, 1>>>(d_neurons, input, neuron_index, port);
+            injectNeuronKernel<<<1, 1>>>(d_neurons, input, neuron_index, port);
             cudaDeviceSynchronize(); // 等待内核执行完成
             return true;
         } catch (...) {
@@ -710,7 +710,7 @@ public:
             // 使用CUDA内核来执行设备操作
             NeuronStats *d_stats;
             cudaMalloc(&d_stats, sizeof(NeuronStats));
-            Neuron::getNeuronStatsKernel<<<1, 1>>>(d_neurons, d_stats, neuron_index);
+            getNeuronStatsKernel<<<1, 1>>>(d_neurons, d_stats, neuron_index);
             cudaDeviceSynchronize(); // 等待内核执行完成
 
             // 将结果从设备内存拷贝到主机内存
@@ -738,7 +738,7 @@ public:
 
         try {
             // 使用CUDA内核来执行设备操作
-            Neuron::setNeuronNoiseKernel<<<1, 1>>>(d_neurons, noise, neuron_index);
+            setNeuronNoiseKernel<<<1, 1>>>(d_neurons, noise, neuron_index);
             cudaDeviceSynchronize(); // 等待内核执行完成
             return true;
         } catch (...) {
@@ -760,7 +760,7 @@ public:
 
         try {
             // 使用CUDA内核来执行设备操作
-            Neuron::setNeuronLearnRateKernel<<<1, 1>>>(d_neurons, learn_rate, neuron_index);
+            setNeuronLearnRateKernel<<<1, 1>>>(d_neurons, learn_rate, neuron_index);
             cudaDeviceSynchronize(); // 等待内核执行完成
             return true;
         } catch (...) {
@@ -883,7 +883,7 @@ private:
                 next_inp.from_coord[2] = 0;
                 next_inp.weight = 1.0;
                 // 使用CUDA内核来执行设备操作
-                Neuron::injectNeuronKernel<<<1, 1>>>(d_neurons, next_inp, 0, 0);
+                injectNeuronKernel<<<1, 1>>>(d_neurons, next_inp, 0, 0);
                 cudaDeviceSynchronize(); // 等待内核执行完成
                 delete next_matrix;
                 next_matrix = nullptr;
@@ -1120,7 +1120,7 @@ private:
                 for (const auto &memory_id: matched_memories) {
                     MemorySlot curr_memory;
                     memory_tree.fetchByHash(memory_id.first, curr_memory);
-                    const char *curr_memory_str = reinterpret_cast<const char *>(curr_memory.content.c_str);
+                    const char *curr_memory_str = reinterpret_cast<const char *>(curr_memory.content.data());
                     processTextString(&memory_processor, std::string(curr_memory_str));
                     delete[] curr_memory_str;
                 }
@@ -1290,7 +1290,7 @@ private:
         // 在主机端执行复制操作
         for (ull i = 0; i < GRID_SIZE * GRID_SIZE * GRID_SIZE; i++) {
             // 使用loadNeuronKernel内核来执行设备操作
-            Neuron::loadNeuronKernel<<<1, 1>>>(d_neurons, other_temp_neurons[i].host_save(), i);
+            loadNeuronKernel<<<1, 1>>>(d_neurons, other_temp_neurons[i].host_save(), i);
             cudaDeviceSynchronize(); // 等待内核执行完成
         }
 
@@ -1316,7 +1316,7 @@ private:
 
         try {
             // 使用CUDA内核来执行设备操作
-            Neuron::processMessageKernel<<<1, 1>>>(d_neurons, message, queue_index);
+            processMessageKernel<<<1, 1>>>(d_neurons, message, queue_index);
             cudaDeviceSynchronize(); // 等待内核执行完成
             return true;
         } catch (...) {

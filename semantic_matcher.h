@@ -32,6 +32,10 @@ struct SemanticMatch {
     std::string hash() const {
         return sha256_hash<SemanticMatch>(*this);
     }
+
+    std::string getText() const {
+        return text;
+    }
 };
 
 class SemanticMatcher {
