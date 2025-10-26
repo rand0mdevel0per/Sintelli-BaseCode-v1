@@ -27,6 +27,10 @@ struct SemanticMatch {
     bool operator<(const SemanticMatch& other) const {
         return similarity > other.similarity; // 降序排列
     }
+
+    std::string hash() {
+        return sha256_hash<SemanticMatch>(*this);
+    }
 };
 
 class SemanticMatcher {

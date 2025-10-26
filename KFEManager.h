@@ -33,7 +33,7 @@
 class KFEManager {
 private:
     std::unordered_map<std::string, KFE_STM_Slot> kfe_storage_;  // KFE存储
-    std::mutex storage_mutex_;                                   // 存储互斥锁
+    mutable std::mutex storage_mutex_;                                   // 存储互斥锁
     std::atomic<bool> running_{false};                          // 运行状态
     std::thread worker_thread_;                                  // 工作线程
     
@@ -142,8 +142,9 @@ public:
      * @return size_t KFE槽位数量
      */
     size_t getKFECount() const {
-        std::lock_guard<std::mutex> lock(storage_mutex_);
+        storage_mutex_.lock();
         return kfe_storage_.size();
+        storage_mutex_.unlock();
     }
     
     /**
