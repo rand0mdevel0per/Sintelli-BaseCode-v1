@@ -6,7 +6,6 @@
 #include <memory>
 
 #include "isw.hpp"
-#include "isw.hpp"
 
 // 语义查询引擎 - 独立的语义处理类，使用smry.cpp中的E5模型
 class SemanticQueryEngine {
@@ -29,7 +28,7 @@ public:
                     const std::string &special_tokens_path);
 
     // 获取文本的语义向量
-    bool getTextEmbedding(const std::string &text, FeatureVector<float> &feature);
+    bool getTextEmbedding(const std::string &text, ::FeatureVector<float> &feature);
 
     // 获取语义向量的维度
     size_t getEmbeddingDimension() const;
@@ -39,7 +38,7 @@ public:
 
     // 批量获取文本嵌入
     bool getBatchEmbeddings(const std::vector<std::string> &texts,
-                            std::vector<FeatureVector<float> > &features);
+                            std::vector<::FeatureVector<float> > &features);
 
     // 计算两个文本之间的语义相似度
     double getSemanticSimilarity(const std::string &text1, const std::string &text2);

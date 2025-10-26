@@ -196,95 +196,6 @@ public:
     }
 
 
-    // CUDA内核函数实现
-
-    static __global__ void injectNeuronKernel(Neuron *neurons, NeuronInput input, int neuron_index, int port) {
-        int idx = blockIdx.x * blockDim.x + threadIdx.x;
-
-        if (idx == 0) {
-            // 只在第一个线程中执行
-
-            neurons[neuron_index].inject(input, port);
-        }
-    }
-
-
-    static __global__ void saveNeuronKernel(Neuron *neurons, NeuronData *data, int neuron_index) {
-        int idx = blockIdx.x * blockDim.x + threadIdx.x;
-
-        if (idx == 0) {
-            // 只在第一个线程中执行
-
-            *data = neurons[neuron_index].save();
-        }
-    }
-
-
-    static __global__ void loadNeuronKernel(Neuron *neurons, NeuronData data, int neuron_index) {
-        int idx = blockIdx.x * blockDim.x + threadIdx.x;
-
-        if (idx == 0) {
-            // 只在第一个线程中执行
-
-            neurons[neuron_index].load(data);
-        }
-    }
-
-
-    static __global__ void updateNeuronKernel(Neuron *neurons, int neuron_index) {
-        int idx = blockIdx.x * blockDim.x + threadIdx.x;
-
-        if (idx == 0) {
-            // 只在第一个线程中执行
-
-            neurons[neuron_index].step();
-        }
-    }
-
-
-    static __global__ void processMessageKernel(Neuron *neurons, Message msg, int neuron_index) {
-        int idx = blockIdx.x * blockDim.x + threadIdx.x;
-
-        if (idx == 0) {
-            // 只在第一个线程中执行
-
-            neurons[neuron_index].processMessage(msg);
-        }
-    }
-
-
-    static __global__ void getNeuronStatsKernel(Neuron *neurons, NeuronStats *stats, int neuron_index) {
-        int idx = blockIdx.x * blockDim.x + threadIdx.x;
-
-        if (idx == 0) {
-            // 只在第一个线程中执行
-
-            *stats = neurons[neuron_index].get_stats();
-        }
-    }
-
-
-    static __global__ void setNeuronNoiseKernel(Neuron *neurons, double noise, int neuron_index) {
-        int idx = blockIdx.x * blockDim.x + threadIdx.x;
-
-        if (idx == 0) {
-            // 只在第一个线程中执行
-
-            neurons[neuron_index].set_noise(noise);
-        }
-    }
-
-
-    static __global__ void setNeuronLearnRateKernel(Neuron *neurons, double learn_rate, int neuron_index) {
-        int idx = blockIdx.x * blockDim.x + threadIdx.x;
-
-        if (idx == 0) {
-            // 只在第一个线程中执行
-
-            neurons[neuron_index].set_learn_rt(learn_rate);
-        }
-    }
-
     __host__ bool load(NeuronData data) {
         try {
             // 注意：port_in 和 port_out 是设备队列，不能直接在主机端操作
@@ -364,9 +275,9 @@ public:
         return stats;
     }
 
-    bool inject(NeuronInput inp, int port) {
+    __host__ bool inject(NeuronInput inp, int port) {
         try {
-            port_in[port].push(inp);
+            port_in[port].host_push(inp);
             return true;
         } catch (...) {
             return false;
@@ -1052,6 +963,7 @@ private:
         }
     }
 
+public:
     // ===== Message Processing =====
     /**
      * @brief Process received messages.
@@ -1139,6 +1051,7 @@ private:
         }
     }
 
+private:
     /**
      * @brief Message routing algorithm in 3D space
      *
@@ -2347,6 +2260,95 @@ __global__ void apply_trace_to_neurons(
 
         // Trace衰减
         trace[tid] *= 0.95;
+    }
+}
+
+// CUDA内核函数实现
+
+static __global__ void injectNeuronKernel(Neuron *neurons, NeuronInput input, int neuron_index, int port) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx == 0) {
+        // 只在第一个线程中执行
+
+        neurons[neuron_index].inject(input, port);
+    }
+}
+
+
+static __global__ void saveNeuronKernel(Neuron *neurons, NeuronData *data, int neuron_index) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx == 0) {
+        // 只在第一个线程中执行
+
+        *data = neurons[neuron_index].save();
+    }
+}
+
+
+static __global__ void loadNeuronKernel(Neuron *neurons, NeuronData data, int neuron_index) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx == 0) {
+        // 只在第一个线程中执行
+
+        neurons[neuron_index].load(data);
+    }
+}
+
+
+static __global__ void updateNeuronKernel(Neuron *neurons, int neuron_index) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx == 0) {
+        // 只在第一个线程中执行
+
+        neurons[neuron_index].step();
+    }
+}
+
+
+static __global__ void processMessageKernel(Neuron *neurons, Message msg, int neuron_index) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx == 0) {
+        // 只在第一个线程中执行
+
+        neurons[neuron_index].processMessage(msg);
+    }
+}
+
+
+static __global__ void getNeuronStatsKernel(Neuron *neurons, NeuronStats *stats, int neuron_index) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx == 0) {
+        // 只在第一个线程中执行
+
+        *stats = neurons[neuron_index].get_stats();
+    }
+}
+
+
+static __global__ void setNeuronNoiseKernel(Neuron *neurons, double noise, int neuron_index) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx == 0) {
+        // 只在第一个线程中执行
+
+        neurons[neuron_index].set_noise(noise);
+    }
+}
+
+
+static __global__ void setNeuronLearnRateKernel(Neuron *neurons, double learn_rate, int neuron_index) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx == 0) {
+        // 只在第一个线程中执行
+
+        neurons[neuron_index].set_learn_rt(learn_rate);
     }
 }
 #endif //SRC_NEURON_H

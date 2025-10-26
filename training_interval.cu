@@ -190,15 +190,6 @@ std::string calculateMathExpression(const std::string &expression) {
     return result;
 }
 
-/*
-// CURL写回调函数
-static size_t WriteCallback(void *contents, size_t size, size_t nmemb, std::string *response) {
-    size_t realsize = size * nmemb;
-    response->append((char*)contents, realsize);
-    return realsize;
-}
-*/
-
 // Perform Bing search
 std::string performBingSearch(const std::string &query, const std::string &apiKey) {
     // 初始化CURL
@@ -288,48 +279,6 @@ std::string performArxivSearch(const std::string &query) {
     return readBuffer;
 }
 
-// Comprehensive search function
-std::string performSearch(const std::string &query) {
-    // Actual API keys are needed here, using placeholders for now
-    const std::string BING_API_KEY = "YOUR_BING_API_KEY";
-    const std::string GOOGLE_API_KEY = "YOUR_GOOGLE_API_KEY";
-    const std::string GOOGLE_ENGINE_ID = "YOUR_GOOGLE_ENGINE_ID";
-
-    std::string result = "";
-
-    // First try academic search (ArXiv)
-    try {
-        std::string arxiv_result = performArxivSearch(query);
-        if (!arxiv_result.empty()) {
-            result += "ArXiv搜索结果:\n" + arxiv_result + "\n\n";
-        }
-    } catch (...) {
-        result += "ArXiv搜索失败\n\n";
-    }
-
-    // Then try Bing search
-    try {
-        std::string bing_result = performBingSearch(query, BING_API_KEY);
-        if (!bing_result.empty()) {
-            result += "Bing搜索结果:\n" + bing_result + "\n\n";
-        }
-    } catch (...) {
-        result += "Bing搜索失败\n\n";
-    }
-
-    // Finally try Google search
-    try {
-        std::string google_result = performGoogleSearch(query, GOOGLE_API_KEY, GOOGLE_ENGINE_ID);
-        if (!google_result.empty()) {
-            result += "Google搜索结果:\n" + google_result + "\n\n";
-        }
-    } catch (...) {
-        result += "Google搜索失败\n\n";
-    }
-
-    return result.empty() ? "搜索失败，未获取到结果" : result;
-}
-
 // No API key required!
 std::string performDuckDuckGoSearch(const std::string &query) {
     CURL *curl = curl_easy_init();
@@ -350,7 +299,6 @@ std::string performDuckDuckGoSearch(const std::string &query) {
 
 // 综合搜索函数
 std::string performSearch(const std::string &query, std::string bing, std::string google, std::string google_eng) {
-    // 这里需要实际的API密钥，暂时使用占位符
     const std::string BING_API_KEY = bing;
     const std::string GOOGLE_API_KEY = google;
     const std::string GOOGLE_ENGINE_ID = google_eng;
@@ -361,10 +309,10 @@ std::string performSearch(const std::string &query, std::string bing, std::strin
     try {
         std::string arxiv_result = performArxivSearch(query);
         if (!arxiv_result.empty()) {
-            result += "ArXiv搜索结果:\n" + arxiv_result + "\n\n";
+            result += "ArXiv search result:\n" + arxiv_result + "\n\n";
         }
     } catch (...) {
-        result += "ArXiv搜索失败\n\n";
+        result += "ArXiv search failed\n\n";
     }
 
     // 然后尝试Bing搜索
@@ -372,19 +320,20 @@ std::string performSearch(const std::string &query, std::string bing, std::strin
         try {
             std::string bing_result = performBingSearch(query, BING_API_KEY);
             if (!bing_result.empty()) {
-                result += "Bing搜索结果:\n" + bing_result + "\n\n";
+                result += "Bing search result:\n" + bing_result + "\n\n";
             }
         } catch (...) {
-            result += "Bing搜索失败\n\n";
+            result += "Bing search failed\n\n";
         }
     }
 
     try {
         std::string ddg_result = performDuckDuckGoSearch(query);
         if (!ddg_result.empty()) {
-            result += "DuckDuckGo搜索结果:\n" + ddg_result + "\n\n";
+            result += "DuckDuckGo search result:\n" + ddg_result + "\n\n";
         }
     } catch (...) {
+        result += "DuckDuckGo search failed\n\n";
     }
 
     // 最后尝试Google搜索
@@ -392,14 +341,14 @@ std::string performSearch(const std::string &query, std::string bing, std::strin
         try {
             std::string google_result = performGoogleSearch(query, GOOGLE_API_KEY, GOOGLE_ENGINE_ID);
             if (!google_result.empty()) {
-                result += "Google搜索结果:\n" + google_result + "\n\n";
+                result += "Google search result:\n" + google_result + "\n\n";
             }
         } catch (...) {
-            result += "Google搜索失败\n\n";
+            result += "Google search failed\n\n";
         }
     }
 
-    return result.empty() ? "搜索失败，未获取到结果" : result;
+    return result.empty() ? "search failed.no result available" : result;
 }
 
 std::pair<std::string, std::string> parseToolCall(const std::string &input) {
@@ -520,7 +469,10 @@ struct reply_trc {
 };
 
 void run_training(NeuronModel *model, const std::string &api_key, const std::string &name = "Sydney",
-                  std::string bing_api_key, std::string google_api_key, std::string google_engine_id, bool *stop) {
+                  std::string bing_api_key = "", std::string google_api_key = "", std::string google_engine_id = "", bool *stop = nullptr) {
+    if (stop == nullptr) {
+        return;
+    }
     std::vector<OpenAIClient::ChatMessage> msgs;
 
     // 创建系统消息，支持多模态输入
@@ -750,7 +702,7 @@ void run_training(NeuronModel *model, const std::string &api_key, const std::str
                     auto matched_logics = logic_injector->findMatchingLogicIds(tool_calls.second);
                     if (matched_logics.size() <= 5) {
                         std::thread(
-                            [this, &tool_calls, input_emb, &logic_injector, &logic_tree, &feature_extractor, &
+                            [&tool_calls, input_emb, &logic_injector, &logic_tree, &feature_extractor, &
                                 rag_loader]() {
                                 try {
                                     rag_loader.autoFetchAndRegisterLogic(
