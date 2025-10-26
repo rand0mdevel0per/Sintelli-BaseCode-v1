@@ -1,11 +1,10 @@
-name: Qodana
+# .github/workflows/qodana.yml
+name: Qodana Code Quality
 on:
-  workflow_dispatch:
-  pull_request:
   push:
-    branches: # Specify your branches here
-      - main # The 'main' branch
-      - 'releases/*' # The release branches
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
 
 jobs:
   qodana:
@@ -15,14 +14,32 @@ jobs:
       pull-requests: write
       checks: write
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}  # to check out the actual pull request commit, not the merge commit
-          fetch-depth: 0  # a full history is required for pull request analysis
-      - name: 'Qodana Scan'
+          fetch-depth: 0 
+
+      - name: Qodana Scan
         uses: JetBrains/qodana-action@v2025.2
         with:
+          linter: jetbrains/qodana-clang:latest
+          results-dir: ${{ runner.temp }}/qodana/results
+          cache-dir: ${{ runner.temp }}/qodana/cache
+          
+          # 额外参数
+          args: |
+            --print-problems
+            --fail-threshold 0
+          
           pr-mode: false
         env:
           QODANA_TOKEN: ${{ secrets.QODANA_TOKEN_1824339855 }}
           QODANA_ENDPOINT: 'https://qodana.cloud'
+      
+      - name: Upload Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: qodana-results
+          path: ${{ runner.temp }}/qodana/results
+          retention-days: 30
