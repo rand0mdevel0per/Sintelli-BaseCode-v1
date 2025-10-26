@@ -1606,6 +1606,18 @@ private:
         double P_Original[256][256];
         memcpy(&P_Original, &P_Matrix, sizeof(P_Matrix));
 
+        double W_backup[256][256];
+        if (training) {
+            memcpy(W_backup, W_predict, sizeof(W_predict));
+            for (int i = 0; i < 256; i++) {
+                for (int j = 0; j < 256; j++) {
+                    if (curand_uniform(&rand_state) < 0.05) {
+                        W_predict[i][j] = 0.0;
+                    }
+                }
+            }
+        }
+
         // P_Matrix × W_predict
         matmul_double(&P_Matrix[0][0], &W_predict[0][0], &temp_product[0][0]);
 
@@ -1755,37 +1767,18 @@ private:
 
         for (int i = 0; i < 256; i++) {
             for (int j = 0; j < 256; j++) {
+                if (training && W_predict[i][j] < 0.01) {
+                    W_predict[i][j] = W_backup[i][j];
+                }
+            }
+        }
+
+        for (int i = 0; i < 256; i++) {
+            for (int j = 0; j < 256; j++) {
                 P_Matrix[i][j] = 0.9 * P_Matrix[i][j] + 0.1 * P_Original[i][j];
             }
         }
-        layerNorm(&P_Matrix[0][0], 256 * 256);
 
-        if (training) {
-            // 需要添加这个标志
-            double dropout_rate = 0.05;
-
-            for (int i = 0; i < 256; i++) {
-                for (int j = 0; j < 256; j++) {
-                    if (curand_uniform(&rand_state) < dropout_rate) {
-                        P_Matrix[i][j] = 0.0;
-                    } else {
-                        // 缩放补偿
-                        P_Matrix[i][j] /= (1.0 - dropout_rate);
-                    }
-                }
-            }
-        }
-
-        // 或者使用DropConnect (dropout权重而不是激活)
-        if (training) {
-            for (int i = 0; i < 256; i++) {
-                for (int j = 0; j < 256; j++) {
-                    if (curand_uniform(&rand_state) < 0.05) {
-                        W_predict[i][j] = 0.0;
-                    }
-                }
-            }
-        }
         layerNorm(&P_Matrix[0][0], 256 * 256);
     }
 
