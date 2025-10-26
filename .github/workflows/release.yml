@@ -1,0 +1,28 @@
+# .github/workflows/release.yml
+name: Release Build
+
+on:
+  push:
+    tags:
+      - 'v*'  # 匹配 v1.0.0, v2.1.3 等
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            build-linux/*
+            build-windows/*
+
+  # 然后触发你的build.yaml
+  trigger-build:
+    needs: create-release
+    uses: ./.github/workflows/build.yaml
