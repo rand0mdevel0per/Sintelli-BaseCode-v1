@@ -1,0 +1,46 @@
+# .github/workflows/comprehensive-analysis.yml
+name: Comprehensive Analysis
+on: [workflow_dispatch]
+
+jobs:
+  analysis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Project Overview
+        uses: iflow-ai/iflow-cli-action@v2.0.0
+        with:
+          prompt: "/init"
+          api_key: ${{ secrets.IFLOW_API_KEY }}
+        id: init
+
+      - name: Architecture Analysis
+        uses: iflow-ai/iflow-cli-action@v2.0.0
+        with:
+          prompt: "Based on the project analysis, provide detailed architecture recommendations"
+          api_key: ${{ secrets.IFLOW_API_KEY }}
+          model: "Qwen3-Coder"
+        id: arch
+
+      - name: Performance Review
+        uses: iflow-ai/iflow-cli-action@v2.0.0
+        with:
+          prompt: "Analyze the code for performance bottlenecks and optimization opportunities"
+          api_key: ${{ secrets.IFLOW_API_KEY }}
+          model: "DeepSeek-V3"
+        id: perf
+
+      - name: Create Summary Report
+        run: |
+          echo "# Comprehensive Analysis Report" > analysis-report.md
+          echo "## Architecture Analysis" >> analysis-report.md
+          echo "${{ steps.arch.outputs.result }}" >> analysis-report.md
+          echo "## Performance Analysis" >> analysis-report.md
+          echo "${{ steps.perf.outputs.result }}" >> analysis-report.md
+
+      - name: Upload Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: analysis-report
+          path: analysis-report.md
