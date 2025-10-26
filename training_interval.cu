@@ -6,33 +6,16 @@
 
 
 #include <iostream>
-
-
 #include "openai_client.h"
-
-
 #include <vector>
-
-
 #include <thread>
-
-
 #include "NeuronModel.cu"
-
-
 #include <string>
-
-
 #include <utility>
-
-
 #include <algorithm>
-
-
 #include <Python.h>
-
-
 #include <curl/curl.h>
+#include "nlohmann//json.hpp"
 
 
 using namespace std;
@@ -508,6 +491,42 @@ std::string streamPerformingOpenAIAPI(OpenAIClient::HttpClient &client, OpenAICl
     return response;
 }
 
+struct reply_trc {
+    float score;
+    std::string reply;
+    bool is_a_checkpoint;
+    bool test_mode;
+    bool need_rollback;
+    float confidence;
+    std::string reasoning;
+
+    static void to_json(nlohmann::json& j, const reply_trc& t) {
+        j = json{
+            {"score", t.score},
+            {"reply", t.reply},
+            {"is_a_checkpoint",t.is_a_checkpoint},
+            {"test_mode", t.test_mode},
+            {"need_rollback", t.need_rollback},
+            {"confidence", t.confidence},
+            {"reasoning", t.reasoning}
+        };
+    }
+
+    static void from_json(const nlohmann::json& j, reply_trc& t ) {
+        try{
+            j.at("score").get_to(t.score);
+            j.at("reply").get_to(t.reply);
+            j.at("is_a_checkpoint").get_to(t.is_a_checkpoint);
+            j.at("test_mode").get_to(t.test_mode);
+            j.at("need_rollback").get_to(t.need_rollback);
+            j.at("confidence").get_to(t.confidence);
+            j.at("reasoning").get_to(t.reasoning);
+        } catch (...) {
+            cerr << "Parse failed!" << endl;
+        }
+    }
+};
+
 void run_training(NeuronModel *model, const std::string &api_key, const std::string &name = "Sydney",
                   std::string bing_api_key, std::string google_api_key, std::string google_engine_id) {
     std::vector<OpenAIClient::ChatMessage> msgs;
@@ -647,13 +666,13 @@ void run_training(NeuronModel *model, const std::string &api_key, const std::str
     req.stop = stops;
     model->clear_sct();
     model->clear_cache();
+    model->enable_training_mode();
+
+    bool test_md = true;
 
     while (run) {
         model->run();
         InputMessage inp;
-        inp.has_text = true;
-        inp.text = input;
-        model->input(inp, "user");
         std::string model_req;
         std::string img;
         for (int _ = 0; _ < 16384; _++) {
@@ -809,11 +828,11 @@ void run_training(NeuronModel *model, const std::string &api_key, const std::str
                                                           "<tool_response_end>");
                     }
                 } else if (tool_calls.first == "stools") {
-                    std::string search_res = performSearch(tool_calls.second);
+                    std::string search_res = performSearch(tool_calls.second, bing_api_key, google_api_key, google_engine_id);
                     req.messages.emplace_back("user", "<tool_response_begin>\n"
                                                       "<tool_id>stools</tool_id>\n"
                                                       "<tool_name>Web Search Engine</tool_name>\n"
-                                                      "<tool_type>Search Engine (Bing, Google, ArXiv)</tool_type>\n"
+                                                      "<tool_type>Search Engine (Bing, Google, ArXiv, DuckDuckGo)</tool_type>\n"
                                                       "ᾯ5" + search_res +
                                                       "</tool_response>\n"
                                                       "<tool_response_end>");
@@ -831,6 +850,30 @@ void run_training(NeuronModel *model, const std::string &api_key, const std::str
                                               "<reason>Undefined tool id<reason/>\n"
                                               "<error_end>");
                 }
+            } else {
+                try{
+                    auto resp_json = json::parse(response);
+                    reply_trc resp;
+                    reply_trc::from_json(resp_json,resp);
+                    inp.has_text = true;
+                    inp.text = resp.reply;
+                    model->update_score(resp.score * resp.confidence);
+                    if (resp.is_a_checkpoint && resp.confidence > 0.3) {
+                        model->save();
+                    }
+                    if (resp.test_mode) {
+                        model->save();
+                        test_md = true;
+                    } else if (test_md && resp.confidence > 0.3) {
+                        model->load();
+                        test_md = false;
+                    }
+                    if (resp.need_rollback && resp.confidence > 0.5) {
+                        model->load();
+                    }
+                } catch (exception& e) {
+                    cerr << "Error: " << e.what() << endl;
+                }
             }
         } catch (exception &e) {
             cerr << "Error: " << e.what() << endl;
@@ -840,6 +883,7 @@ void run_training(NeuronModel *model, const std::string &api_key, const std::str
                 req.messages.erase(req.messages.begin() + 1);
             }
         }
+        model->input(inp,"user");
     }
 }
 
