@@ -294,11 +294,8 @@ cmake -B cmake-build-debug -S . -G "Visual Studio 17 2022"
 cmake --build cmake-build-debug
 ```
 
-### Run
-```bash
-# Run the generated executable
-./cmake-build-debug/Debug/src.exe
-```
+### Usage
+Import the generated .so/.pyd/.dll file in python and use it.
 
 ## Development Conventions
 
