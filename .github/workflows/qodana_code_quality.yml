@@ -28,7 +28,6 @@ jobs:
           
           # 额外参数
           args: |
-            --print-problems
             --fail-threshold 0
           
           pr-mode: false
