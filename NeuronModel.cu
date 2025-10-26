@@ -183,6 +183,7 @@ public:
             new(&d_neurons[idx]) Neuron(neighbour_q, coord, seed, &queues[x][y][z],
                                         &kfe_storage_queue, &kfe_query_queue, &kfe_result_queue);
             // placement new
+            d_neurons[idx].set_size(GRID_SIZE);
         }
 
         std::cout << "Distributed neuron system initialization completed!" << std::endl;
@@ -594,10 +595,16 @@ public:
 
     void enable_training_mode() {
         training = true;
+        for (ull i = 0; i < GRID_SIZE ^ 3 ; i++) {
+            d_neurons[i].enable_training();
+        }
     }
 
     void disable_training_mode() {
         training = false;
+        for (ull i = 0; i < GRID_SIZE ^ 3 ; i++) {
+            d_neurons[i].disable_training();
+        }
     }
 
     bool update_score(double score_) {
