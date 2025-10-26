@@ -40,16 +40,16 @@
  * - V: Volatility metric
  * - Vmem: Memory content matrix (256x256)
  * - conv16: Compressed 16x16 representation
- */
- * 存储神经元的短期知识片段，包含：
- * - 本地效用计数
- * - 最后访问周期
- * - 核心影响因子
- * - 知识片段向量
- * - 槽位有效性标志
- * - 16×16卷积特征
+ *
+ * Stores short-term knowledge fragments for neurons, containing:
+ * - Local utility count
+ * - Last access cycle
+ * - Core influence factor
+ * - Knowledge fragment vector
+ * - Slot validity flag
+ * - 16x16 convolution features
  * 
- * @note 使用SHA256哈希作为唯一标识符
+ * @note Uses SHA256 hash as unique identifier
  */
 struct KFE_STM_Slot {
     double Ulocal; // Local utility count
@@ -68,19 +68,19 @@ struct KFE_STM_Slot {
 
 /**
  * @struct Logic
- * @brief 逻辑数据结构
+ * @brief Logic data structure
  * 
  * @details
- * 存储逻辑内容，包含：
- * - 周期计数
- * - 固定大小字符数组（替代std::string）
- * - 重要性评分
+ * Stores logic content, containing:
+ * - Cycle count
+ * - Fixed-size character array (替代std::string)
+ * - Importance score
  * 
- * @note 使用固定大小数组避免动态内存分配
+ * @note Uses fixed-size array to avoid dynamic memory allocation
  */
 struct Logic {
     ull Rcycles;
-    wchar_t content[1024]; // 固定大小的字符数组替代 std::string
+    wchar_t content[1024]; // Fixed-size character array替代 std::string
     double importance;
     std::string hash() {
         return sha256_hash<Logic>(*this);
@@ -89,20 +89,20 @@ struct Logic {
 
 /**
  * @struct InputMessage
- * @brief 输入消息结构
+ * @brief Input message structure
  * 
  * @details
- * 支持多模态输入：
- * - 文本输入
- * - 图像输入（Base64编码）
+ * Supports multimodal input:
+ * - Text input
+ * - Image input (Base64 encoded)
  * 
- * @note 图像数据使用Base64编码以支持网络传输
+ * @note Image data uses Base64 encoding to support network transmission
  */
 struct InputMessage {
     bool has_img;
     bool has_text;
     std::string text;
-    std::string base64_image; // Base64编码的图像数据
+    std::string base64_image; // Base64 encoded image data
 };
 
 struct ExtKFE_Slot {
@@ -155,14 +155,14 @@ enum MessageType {
  * - compression_mode: Compression strategy (FULL/RESIDUAL/CONV_ONLY)
  */
 struct Message {
-    ll last_proxy_coord[3]; // 最后一个代理坐标
-    ll from_coord[3]; // 发送者坐标
-    ll to_coord[3]; // 接收者坐标
-    //double value[256][256];    // 数据矩阵
-    double activity; // 活跃度
-    MessageType type; // 消息类型
-    ll remains; // 剩余跳数(用于FIND_NEURON)
-    double weight; // 权重
+    ll last_proxy_coord[3]; // Last proxy coordinate
+    ll from_coord[3]; // Sender coordinate
+    ll to_coord[3]; // Receiver coordinate
+    //double value[256][256];    // Data matrix
+    double activity; // Activity level
+    MessageType type; // Message type
+    ll remains; // Remaining hops (for FIND_NEURON)
+    double weight; // Weight
     union {
         FullMessage full_msg;
         ConvMessage conv_msg;

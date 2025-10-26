@@ -12,7 +12,7 @@ class GPUMutex {
 private:
     int* lock_state;  // 0=未锁, 1=已锁
 public:
-    GPUMutex() {lock_state = 0;}
+    __device__ GPUMutex() {lock_state = 0;}
 
     __device__ void init(int* state) {
         lock_state = state;
@@ -43,34 +43,34 @@ private:
     GPUMutex* mutex;
     bool owns_lock;
 public:
-    GPUMutexGuard() = delete;
-    GPUMutexGuard(const GPUMutexGuard& mutex_guard) {
+    __device__ GPUMutexGuard() = delete;
+    __device__ GPUMutexGuard(const GPUMutexGuard& mutex_guard) {
         mutex = mutex_guard.mutex;
         owns_lock = mutex->try_lock();
     };
-    GPUMutexGuard(GPUMutex* mutex_original) {
+    __device__ GPUMutexGuard(GPUMutex* mutex_original) {
         mutex = mutex_original;
         mutex->lock();
         owns_lock = true;
     }
-    ~GPUMutexGuard() {
+    __device__ ~GPUMutexGuard() {
         if (owns_lock) {
             mutex->unlock();
         }
     }
-    void unlock() {
+    __device__ void unlock() {
         if (owns_lock) {
             mutex->unlock();
             owns_lock = false;
         }
     }
-    bool try_lock() {
+    __device__ bool try_lock() {
         if (!owns_lock) {
             owns_lock = mutex->try_lock();
         }
         return owns_lock;
     }
-    void lock() {
+    __device__ void lock() {
         if (!owns_lock) {
             mutex->lock();
             owns_lock = true;

@@ -365,7 +365,7 @@ static PyObject *py_run_native_training(PyObject *self, PyObject *args) {
            stop_training = false;
            run_training(g_model, bing_api, name, google_api, google_eng, openrouter_api, &stop_training);
        });
-        thd_training.detach();
+        //thd_training.detach();
     } catch (...) {
         Py_RETURN_FALSE;
     }

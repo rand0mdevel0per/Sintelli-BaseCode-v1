@@ -216,8 +216,8 @@ private:
         uint64_t last_access_time;
     };
 
-    __managed__ Block blocks[MAX_BLOCKS] = {};
-    __managed__ int free_count = 0;
+    Block blocks[MAX_BLOCKS] = {};
+    int free_count = 0;
 
 public:
     __host__ void initialize() {
@@ -278,7 +278,7 @@ public:
 };
 
 // ===== 全局统一内存池实例 =====
-__managed__ UnifiedMemoryPool global_memory_pool;
+UnifiedMemoryPool global_memory_pool;
 
 // ===== Convolution and Residual Processing =====
 /**
@@ -460,9 +460,9 @@ public:
 // ===== 消息编码器 =====
 class MessageEncoder {
 private:
-    ConvKernel16 conv_kernel;
-    __declspec(__managed__) double reconstruction_error_history[100];
-    __declspec(__managed__) int error_index;
+    ConvKernel16 conv_kernel = {};
+    double reconstruction_error_history[100] = {};
+    int error_index = 0;
 
 public:
     __device__ void initialize(curandStatePhilox4_32_10_t* rand_state) {
