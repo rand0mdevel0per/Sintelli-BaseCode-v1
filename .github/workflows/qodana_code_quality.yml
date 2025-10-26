@@ -19,22 +19,6 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
-      - name: Setup GCC 11
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-11 g++-11
-          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100
-          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 100
-      - name: Install CUDA
-        uses: Jimver/cuda-toolkit@v0.2.11
-        with:
-          cuda: '12.1.0'
-          upload-log-artifact: false
-      - name: Configure CMake
-        run: |
-          mkdir build
-          cd build
-          cmake .. -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
       - name: 'Qodana Scan'
         uses: JetBrains/qodana-action@v2025.2
         with:
