@@ -189,8 +189,8 @@ public:
         std::cout << "Distributed neuron system initialization completed!" << std::endl;
     }
 
-    explicit NeuronModel(const std::string& path) : processor(e5), logic_processor(e5), memory_processor(e5),
-                                             sct_processor(e5), cache_processor(e5) {
+    explicit NeuronModel(const std::string &path) : processor(e5), logic_processor(e5), memory_processor(e5),
+                                                    sct_processor(e5), cache_processor(e5) {
         // Use delegating constructor
         NeuronModel(2);
         path_default = path;
@@ -209,12 +209,10 @@ public:
     bool run() {
         try {
             is_running = true;
-            eventloop = std::thread([this]() {
-                this->loop();
-            });
+            // 使用正确的线程创建方式
+            eventloop = std::thread(&NeuronModel::loop, this);
             eventloop.detach();
             std::cout << "Neuron network is running..." << std::endl;
-            std::thread(loop).detach();
             return true;
         } catch (...) {
             return false;
@@ -227,15 +225,34 @@ public:
             // Reset pointers before saving
             resetPointersForSerialization();
 
-            std::vector<NeuronData> ndata;
+            // 为每个神经元创建主机端数据副本
+            std::vector<NeuronData> host_neuron_data(GRID_SIZE * GRID_SIZE * GRID_SIZE);
 
-            for (ull i = 0; i < GRID_SIZE ^ 3; i++) {
-                ndata.push_back(d_neurons[i].save());
+            // 为每个神经元调用save内核并收集数据
+            for (ull i = 0; i < GRID_SIZE * GRID_SIZE * GRID_SIZE; i++) {
+                // 使用CUDA内核来执行设备操作
+                NeuronData *d_neuron_data;
+                cudaMalloc(&d_neuron_data, sizeof(NeuronData));
+                Neuron::saveNeuronKernel<<<1, 1>>>(d_neurons, d_neuron_data, i);
+                cudaDeviceSynchronize(); // 等待内核执行完成
+
+                // 将结果从设备内存拷贝到主机内存
+                NeuronData host_data;
+                cudaMemcpy(&host_data, d_neuron_data, sizeof(NeuronData), cudaMemcpyDeviceToHost);
+                host_neuron_data[i] = host_data;
+
+                // 释放设备内存
+                cudaFree(d_neuron_data);
+            }
+
+            // 将主机端数据添加到ndata向量中
+            for (const auto &neuron_data: host_neuron_data) {
+                host_neuron_data.push_back(neuron_data);
             }
 
             std::pair<NeuronModel, std::vector<NeuronData> > nmdata;
             nmdata.first.copyFrom(*this);
-            nmdata.second = ndata;
+            nmdata.second = host_neuron_data;
 
             bool result = Serializer<std::pair<NeuronModel, std::vector<NeuronData> > >::save(nmdata, path);
 
@@ -539,7 +556,7 @@ public:
     }
 
     bool clear_sct() {
-        try{
+        try {
             return sct.reset();
         } catch (...) {
             return false;
@@ -547,7 +564,7 @@ public:
     }
 
     bool clear_cache() {
-        try{
+        try {
             while (!cache_queue.empty()) {
                 cache_queue.pop();
             }
@@ -562,7 +579,7 @@ public:
             is_running = false;
             // Wait for all streams to complete
             // Synchronize all CUDA streams to ensure all GPU operations are finished
-            for (auto & stream : streams) {
+            for (auto &stream: streams) {
                 cudaStreamSynchronize(stream);
             }
             eventloop.join();
@@ -595,21 +612,21 @@ public:
 
     void enable_training_mode() {
         training = true;
-        for (ull i = 0; i < GRID_SIZE ^ 3 ; i++) {
+        for (ull i = 0; i < GRID_SIZE ^ 3; i++) {
             d_neurons[i].enable_training();
         }
     }
 
     void disable_training_mode() {
         training = false;
-        for (ull i = 0; i < GRID_SIZE ^ 3 ; i++) {
+        for (ull i = 0; i < GRID_SIZE ^ 3; i++) {
             d_neurons[i].disable_training();
         }
     }
 
     bool update_score(double score_) {
         if (!training) return false;
-        try{
+        try {
             ull neuron_count = GRID_SIZE ^ 3;
             ull threads_per_block = 256;
             ull blocks = (neuron_count + threads_per_block - 1) / threads_per_block;
@@ -631,6 +648,124 @@ public:
 
     NeuronStats get_n_stats(ull id) {
         return d_neurons->get_stats();
+    }
+
+    /**
+     * @brief 在指定神经元上执行单步更新
+     *
+     * @param neuron_index 神经元索引
+     * @return true if成功, false if失败
+     */
+    bool updateNeuron(ull neuron_index) {
+        if (neuron_index >= GRID_SIZE * GRID_SIZE * GRID_SIZE) {
+            return false;
+        }
+
+        try {
+            // 使用CUDA内核来执行设备操作
+            Neuron::updateNeuronKernel<<<1, 1>>>(d_neurons, neuron_index);
+            cudaDeviceSynchronize(); // 等待内核执行完成
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
+    /**
+     * @brief 向指定神经元注入输入数据
+     *
+     * @param neuron_index 神经元索引
+     * @param input 输入数据
+     * @param port 端口号
+     * @return true if成功, false if失败
+     */
+    bool injectToNeuron(ull neuron_index, const NeuronInput &input, int port) {
+        if (neuron_index >= GRID_SIZE * GRID_SIZE * GRID_SIZE || port < 0 || port >= 4) {
+            return false;
+        }
+
+        try {
+            // 使用CUDA内核来执行设备操作
+            Neuron::injectNeuronKernel<<<1, 1>>>(d_neurons, input, neuron_index, port);
+            cudaDeviceSynchronize(); // 等待内核执行完成
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
+    /**
+     * @brief 获取指定神经元的状态信息
+     *
+     * @param neuron_index 神经元索引
+     * @param stats 状态信息输出
+     * @return true if成功, false if失败
+     */
+    bool getNeuronStats(ull neuron_index, NeuronStats &stats) {
+        if (neuron_index >= GRID_SIZE * GRID_SIZE * GRID_SIZE) {
+            return false;
+        }
+
+        try {
+            // 使用CUDA内核来执行设备操作
+            NeuronStats *d_stats;
+            cudaMalloc(&d_stats, sizeof(NeuronStats));
+            Neuron::getNeuronStatsKernel<<<1, 1>>>(d_neurons, d_stats, neuron_index);
+            cudaDeviceSynchronize(); // 等待内核执行完成
+
+            // 将结果从设备内存拷贝到主机内存
+            cudaMemcpy(&stats, d_stats, sizeof(NeuronStats), cudaMemcpyDeviceToHost);
+
+            // 释放设备内存
+            cudaFree(d_stats);
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
+    /**
+     * @brief 设置指定神经元的噪声参数
+     *
+     * @param neuron_index 神经元索引
+     * @param noise 噪声值
+     * @return true if成功, false if失败
+     */
+    bool setNeuronNoise(ull neuron_index, double noise) {
+        if (neuron_index >= GRID_SIZE * GRID_SIZE * GRID_SIZE) {
+            return false;
+        }
+
+        try {
+            // 使用CUDA内核来执行设备操作
+            Neuron::setNeuronNoiseKernel<<<1, 1>>>(d_neurons, noise, neuron_index);
+            cudaDeviceSynchronize(); // 等待内核执行完成
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
+    /**
+     * @brief 设置指定神经元的学习率
+     *
+     * @param neuron_index 神经元索引
+     * @param learn_rate 学习率
+     * @return true if成功, false if失败
+     */
+    bool setNeuronLearnRate(ull neuron_index, double learn_rate) {
+        if (neuron_index >= GRID_SIZE * GRID_SIZE * GRID_SIZE) {
+            return false;
+        }
+
+        try {
+            // 使用CUDA内核来执行设备操作
+            Neuron::setNeuronLearnRateKernel<<<1, 1>>>(d_neurons, learn_rate, neuron_index);
+            cudaDeviceSynchronize(); // 等待内核执行完成
+            return true;
+        } catch (...) {
+            return false;
+        }
     }
 
 private:
@@ -678,7 +813,7 @@ private:
 
     bool apply_trace() {
         if (!training) return false;
-        try{
+        try {
             ull neuron_count = GRID_SIZE ^ 3;
             ull threads_per_block = 256;
             ull blocks = (neuron_count + threads_per_block - 1) / threads_per_block;
@@ -747,7 +882,11 @@ private:
                 next_inp.from_coord[1] = 0;
                 next_inp.from_coord[2] = 0;
                 next_inp.weight = 1.0;
-                d_neurons[0].inject(next_inp, 0);
+                // 使用CUDA内核来执行设备操作
+                Neuron::injectNeuronKernel<<<1, 1>>>(d_neurons, next_inp, 0, 0);
+                cudaDeviceSynchronize(); // 等待内核执行完成
+                delete next_matrix;
+                next_matrix = nullptr;
                 delete next_matrix;
                 next_matrix = nullptr;
             }
@@ -1096,6 +1235,17 @@ private:
         return false;
     }
 
+    /**
+     * @brief 处理KFE管理器的队列
+     *
+     * @return 处理的请求数量
+     */
+    int processKFEQueues() {
+        // 注意：这个方法应该在KFEManager类中实现
+        // 这里只是一个占位符，实际实现应该在KFEManager中
+        return 0;
+    }
+
     void resetPointersForSerialization() const {
         // Reset pointers for all neurons
         ull total_neurons = GRID_SIZE * GRID_SIZE * GRID_SIZE;
@@ -1112,12 +1262,66 @@ private:
         memory_tree = other.memory_tree;
         cache_queue = other.cache_queue;
         memcpy(d_active_flags, other.d_active_flags, sizeof(d_active_flags));
-        ull total_neurons = GRID_SIZE * GRID_SIZE * GRID_SIZE;
-        for (ull i = 0; i < total_neurons; i++) {
-            d_neurons[i].load(other.d_neurons[i].save());
+
+        // 使用CUDA内存拷贝来复制神经元数据
+        // 分配临时主机内存
+        Neuron *temp_neurons = new Neuron[GRID_SIZE * GRID_SIZE * GRID_SIZE];
+        Neuron *other_temp_neurons = new Neuron[GRID_SIZE * GRID_SIZE * GRID_SIZE];
+
+        // 将设备内存拷贝到主机内存
+        cudaError_t err1 = cudaMemcpy(temp_neurons, d_neurons,
+                                      GRID_SIZE * GRID_SIZE * GRID_SIZE * sizeof(Neuron),
+                                      cudaMemcpyDeviceToHost);
+        if (err1 != cudaSuccess) {
+            delete[] temp_neurons;
+            delete[] other_temp_neurons;
+            return;
         }
+
+        cudaError_t err2 = cudaMemcpy(other_temp_neurons, other.d_neurons,
+                                      GRID_SIZE * GRID_SIZE * GRID_SIZE * sizeof(Neuron),
+                                      cudaMemcpyDeviceToHost);
+        if (err2 != cudaSuccess) {
+            delete[] temp_neurons;
+            delete[] other_temp_neurons;
+            return;
+        }
+
+        // 在主机端执行复制操作
+        for (ull i = 0; i < GRID_SIZE * GRID_SIZE * GRID_SIZE; i++) {
+            // 使用loadNeuronKernel内核来执行设备操作
+            Neuron::loadNeuronKernel<<<1, 1>>>(d_neurons, other_temp_neurons[i].host_save(), i);
+            cudaDeviceSynchronize(); // 等待内核执行完成
+        }
+
+        // 释放临时内存
+        delete[] temp_neurons;
+        delete[] other_temp_neurons;
+
         resetPointersForSerialization();
         rebuildPointerConnections();
+    }
+
+    /**
+     * @brief 处理设备队列
+     *
+     * @param queue_index 队列索引
+     * @param message 消息
+     * @return true if成功, false if失败
+     */
+    bool processDeviceQueue(int queue_index, const Message &message) {
+        if (queue_index < 0 || queue_index >= GRID_SIZE * GRID_SIZE * GRID_SIZE) {
+            return false;
+        }
+
+        try {
+            // 使用CUDA内核来执行设备操作
+            Neuron::processMessageKernel<<<1, 1>>>(d_neurons, message, queue_index);
+            cudaDeviceSynchronize(); // 等待内核执行完成
+            return true;
+        } catch (...) {
+            return false;
+        }
     }
 
     void rebuildPointerConnections() {
