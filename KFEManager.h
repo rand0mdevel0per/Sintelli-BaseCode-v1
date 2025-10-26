@@ -32,14 +32,14 @@
  */
 class KFEManager {
 private:
-    std::unordered_map<std::string, KFE_STM_Slot> kfe_storage_;  // KFE存储
+    std::unordered_map<GPUString, KFE_STM_Slot> kfe_storage_;  // KFE存储
     mutable std::mutex storage_mutex_;                                   // 存储互斥锁
     std::atomic<bool> running_{false};                          // 运行状态
     std::thread worker_thread_;                                  // 工作线程
     
     // 设备端队列指针
     DeviceQueue<KFE_STM_Slot, 32>* storage_queue_;
-    DeviceQueue<std::string, 32>* query_queue_;
+    DeviceQueue<GPUString, 32>* query_queue_;
     DeviceQueue<KFE_STM_Slot, 32>* result_queue_;
 
     /**
@@ -51,11 +51,11 @@ private:
             KFE_STM_Slot slot;
             if (storage_queue_ && storage_queue_->pop(slot)) {
                 std::lock_guard<std::mutex> lock(storage_mutex_);
-                kfe_storage_[slot.hash()] = slot;
+                kfe_storage_[slot.hash().c_str()] = slot;
             }
             
             // 处理查询请求
-            std::string query_hash;
+            GPUString query_hash;
             if (query_queue_ && query_queue_->pop(query_hash)) {
                 std::lock_guard<std::mutex> lock(storage_mutex_);
                 auto it = kfe_storage_.find(query_hash);
@@ -78,7 +78,7 @@ public:
      * @param result_queue KFE查询结果队列
      */
     KFEManager(DeviceQueue<KFE_STM_Slot, 32>* storage_queue,
-               DeviceQueue<std::string, 32>* query_queue,
+               DeviceQueue<GPUString, 32>* query_queue,
                DeviceQueue<KFE_STM_Slot, 32>* result_queue)
         : storage_queue_(storage_queue)
         , query_queue_(query_queue)
@@ -118,7 +118,7 @@ public:
      */
     void storeKFE(const KFE_STM_Slot& slot) {
         std::lock_guard<std::mutex> lock(storage_mutex_);
-        kfe_storage_[slot.hash()] = slot;
+        kfe_storage_[slot.hash().c_str()] = slot;
     }
     
     /**
@@ -129,7 +129,7 @@ public:
      */
     KFE_STM_Slot findKFE(const std::string& hash) {
         std::lock_guard<std::mutex> lock(storage_mutex_);
-        auto it = kfe_storage_.find(hash);
+        auto it = kfe_storage_.find(hash.c_str());
         if (it != kfe_storage_.end()) {
             return it->second;
         }
