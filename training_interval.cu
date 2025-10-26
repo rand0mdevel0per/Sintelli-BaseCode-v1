@@ -21,7 +21,7 @@
 using namespace std;
 
 
-// CURL全局初始化
+// CURL Global Initialization
 
 static bool curl_initialized = false;
 
@@ -35,7 +35,7 @@ static void init_curl() {
 
 
 std::string runPythonCode(const std::string &code) {
-    // 初始化Python（如果还没初始化）
+    // Initialize Python (if not already initialized)
     static bool python_initialized = false;
     if (!python_initialized) {
         Py_Initialize();
@@ -49,7 +49,7 @@ std::string runPythonCode(const std::string &code) {
         return "Failed to initialize Python";
     }
 
-    // 捕获stdout
+    // Capture stdout
     PyRun_SimpleString(
         "import sys\n"
         "from io import StringIO\n"
@@ -57,10 +57,10 @@ std::string runPythonCode(const std::string &code) {
         "sys.stdout = mystdout = StringIO()\n"
     );
 
-    // 执行代码
+    // Execute code
     int result = PyRun_SimpleString(code.c_str());
 
-    // 获取输出
+    // Get output
     PyRun_SimpleString(
         "sys.stdout = old_stdout\n"
         "output = mystdout.getvalue()\n"
@@ -71,7 +71,7 @@ std::string runPythonCode(const std::string &code) {
         return "Error executing Python code";
     }
 
-    // 获取输出字符串
+    // Get output string
     PyObject *main_module = PyImport_AddModule("__main__");
     PyObject *main_dict = PyModule_GetDict(main_module);
     PyObject *output_obj = PyDict_GetItemString(main_dict, "output");
@@ -87,9 +87,9 @@ std::string runPythonCode(const std::string &code) {
     return output;
 }
 
-// 数学计算函数，使用sympy进行符号计算
+// Mathematical calculation function using sympy for symbolic computation
 std::string calculateMathExpression(const std::string &expression) {
-    // 确保安装了sympy
+    // Ensure sympy is installed
     std::string install_code = "("
             "import subprocess\n"
             "import sys\n"
@@ -102,10 +102,10 @@ std::string calculateMathExpression(const std::string &expression) {
             "    print(\"Sympy installed successfully\")\n"
             ")\n";
 
-    // 执行安装代码（即使已经安装了，pip也会自动跳过）
+    // Execute installation code (pip will automatically skip if already installed)
     std::string install_result = runPythonCode(install_code);
 
-    // 数学计算代码
+    // Mathematical calculation code
     std::string math_code = R"("
             "import sys\n"
             "import math\n"
@@ -183,7 +183,7 @@ std::string calculateMathExpression(const std::string &expression) {
             "        print(\"Error in fallback calculation:\", str(e2))\n"
             ")\n";
 
-    // 执行数学计算代码
+    // Execute mathematical calculation code
     std::string result = runPythonCode(math_code);
     return result;
 }
@@ -197,7 +197,7 @@ static size_t WriteCallback(void *contents, size_t size, size_t nmemb, std::stri
 }
 */
 
-// 执行Bing搜索
+// Perform Bing search
 std::string performBingSearch(const std::string &query, const std::string &apiKey) {
     // 初始化CURL
     init_curl();
@@ -231,7 +231,7 @@ std::string performBingSearch(const std::string &query, const std::string &apiKe
     return readBuffer;
 }
 
-// 执行Google搜索（通过自定义搜索引擎）
+// Perform Google search (via custom search engine)
 std::string performGoogleSearch(const std::string &query, const std::string &apiKey, const std::string &engineId) {
     // 初始化CURL
     init_curl();
@@ -259,7 +259,7 @@ std::string performGoogleSearch(const std::string &query, const std::string &api
     return readBuffer;
 }
 
-// 执行ArXiv搜索
+// Perform ArXiv search
 std::string performArxivSearch(const std::string &query) {
     // 初始化CURL
     init_curl();
@@ -286,16 +286,16 @@ std::string performArxivSearch(const std::string &query) {
     return readBuffer;
 }
 
-// 综合搜索函数
+// Comprehensive search function
 std::string performSearch(const std::string &query) {
-    // 这里需要实际的API密钥，暂时使用占位符
+    // Actual API keys are needed here, using placeholders for now
     const std::string BING_API_KEY = "YOUR_BING_API_KEY";
     const std::string GOOGLE_API_KEY = "YOUR_GOOGLE_API_KEY";
     const std::string GOOGLE_ENGINE_ID = "YOUR_GOOGLE_ENGINE_ID";
 
     std::string result = "";
 
-    // 先尝试学术搜索（ArXiv）
+    // First try academic search (ArXiv)
     try {
         std::string arxiv_result = performArxivSearch(query);
         if (!arxiv_result.empty()) {
@@ -305,7 +305,7 @@ std::string performSearch(const std::string &query) {
         result += "ArXiv搜索失败\n\n";
     }
 
-    // 然后尝试Bing搜索
+    // Then try Bing search
     try {
         std::string bing_result = performBingSearch(query, BING_API_KEY);
         if (!bing_result.empty()) {
@@ -315,7 +315,7 @@ std::string performSearch(const std::string &query) {
         result += "Bing搜索失败\n\n";
     }
 
-    // 最后尝试Google搜索
+    // Finally try Google search
     try {
         std::string google_result = performGoogleSearch(query, GOOGLE_API_KEY, GOOGLE_ENGINE_ID);
         if (!google_result.empty()) {
@@ -328,7 +328,7 @@ std::string performSearch(const std::string &query) {
     return result.empty() ? "搜索失败，未获取到结果" : result;
 }
 
-// 无需API key!
+// No API key required!
 std::string performDuckDuckGoSearch(const std::string &query) {
     CURL *curl = curl_easy_init();
     std::string url = "https://api.duckduckgo.com/?q=" +
@@ -401,11 +401,11 @@ std::string performSearch(const std::string &query, std::string bing, std::strin
 }
 
 std::pair<std::string, std::string> parseToolCall(const std::string &input) {
-    // 转换为小写进行不区分大小写的搜索
+    // Convert to lowercase for case-insensitive search
     std::string lower_input = input;
     std::transform(lower_input.begin(), lower_input.end(), lower_input.begin(), ::tolower);
 
-    // 定义标记（也转换为小写）
+    // Define markers (also converted to lowercase)
     std::string tool_begin = "<tool_begin>";
     std::string tool_id_beg = "[tool_id_beg]";
     std::string tool_id_end = "[tool_id_end]";
@@ -413,53 +413,53 @@ std::pair<std::string, std::string> parseToolCall(const std::string &input) {
     std::string tool_content_end = "[tool_content_end]";
     std::string tool_end = "<tool_end>";
 
-    // 查找工具调用的开始位置
+    // Find the start position of tool call
     size_t begin_pos = lower_input.find(tool_begin);
     if (begin_pos == std::string::npos) {
-        return std::make_pair("", ""); // 未找到工具调用开始标记
+        return std::make_pair("", ""); // Tool call start marker not found
     }
 
-    // 查找工具调用的结束位置
+    // Find the end position of tool call
     size_t end_pos = lower_input.find(tool_end, begin_pos);
     if (end_pos == std::string::npos) {
-        return std::make_pair("", ""); // 未找到工具调用结束标记
+        return std::make_pair("", ""); // Tool call end marker not found
     }
 
-    // 提取完整的工具调用部分
+    // Extract the complete tool call section
     std::string tool_call_section = input.substr(begin_pos, end_pos - begin_pos + tool_end.length());
     std::string lower_section = lower_input.substr(begin_pos, end_pos - begin_pos + tool_end.length());
 
-    // 查找tool_id_beg和tool_id_end的位置
+    // Find positions of tool_id_beg and tool_id_end
     size_t id_beg_pos = lower_section.find(tool_id_beg);
     if (id_beg_pos == std::string::npos) {
-        return std::make_pair("", ""); // 未找到tool_id开始标记
+        return std::make_pair("", ""); // tool_id start marker not found
     }
 
     size_t id_start = id_beg_pos + tool_id_beg.length();
     size_t id_end_pos = lower_section.find(tool_id_end, id_start);
     if (id_end_pos == std::string::npos) {
-        return std::make_pair("", ""); // 未找到tool_id结束标记
+        return std::make_pair("", ""); // tool_id end marker not found
     }
 
-    // 提取tool_id
+    // Extract tool_id
     std::string tool_id = tool_call_section.substr(id_start, id_end_pos - id_start);
 
-    // 查找tool_content_beg和tool_content_end的位置
+    // Find positions of tool_content_beg and tool_content_end
     size_t content_beg_pos = lower_section.find(tool_content_beg);
     if (content_beg_pos == std::string::npos) {
-        return std::make_pair("", ""); // 未找到tool_content开始标记
+        return std::make_pair("", ""); // tool_content start marker not found
     }
 
     size_t content_start = content_beg_pos + tool_content_beg.length();
     size_t content_end_pos = lower_section.find(tool_content_end, content_start);
     if (content_end_pos == std::string::npos) {
-        return std::make_pair("", ""); // 未找到tool_content结束标记
+        return std::make_pair("", ""); // tool_content end marker not found
     }
 
-    // 提取tool_content
+    // Extract tool_content
     std::string tool_content = tool_call_section.substr(content_start, content_end_pos - content_start);
 
-    // 去除首尾空格
+    // Remove leading and trailing whitespace
     tool_id.erase(0, tool_id.find_first_not_of(" \t\n\r"));
     tool_id.erase(tool_id.find_last_not_of(" \t\n\r") + 1);
     tool_content.erase(0, tool_content.find_first_not_of(" \t\n\r"));

@@ -1,12 +1,21 @@
 # =============================================================================
-# iFlow Neural Network Simulator - CMake构建配置
+# Sintelli Neural Network Simulator - CMake Build Configuration
 # 
-# 项目: CUDA神经网络模拟器
-# 版本: 1.0
-# 日期: 2025-10-03
+# Project: CUDA Neural Network Simulator
+# Version: 1.0
+# Date: 2025-10-03
+# Github Repo: https://github.com/rand0mdevel0per/Sintelli-BaseCode-v1
+#
+# This file configures the CMake build system for the Sintelli Neural Network 
+# Simulator. It specifies dependencies, compiler options, and build targets.
 # =============================================================================
 
 cmake_minimum_required(VERSION 3.18)
+
+if(MSVC)
+    add_compile_options(/utf-8)
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler=/utf-8")
+endif()
 
 project(src CXX CUDA)
 
@@ -14,7 +23,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 # =============================================================================
-# Python配置
+# Python Configuration
 # =============================================================================
 
 find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
@@ -24,7 +33,7 @@ message(STATUS "   Include: ${Python3_INCLUDE_DIRS}")
 message(STATUS "   Library: ${Python3_LIBRARIES}")
 
 # =============================================================================
-# CUDA配置
+# CUDA Configuration
 # =============================================================================
 
 find_package(CUDAToolkit REQUIRED)
@@ -32,31 +41,31 @@ find_package(CUDAToolkit REQUIRED)
 set(CMAKE_CUDA_ARCHITECTURES native)
 set(CMAKE_CUDA_STANDARD 20)
 
-if(CUDAToolkit_FOUND)
+if (CUDAToolkit_FOUND)
     message(STATUS "🎯 CUDA: ${CUDAToolkit_VERSION}")
     message(STATUS "   Include: ${CUDAToolkit_INCLUDE_DIRS}")
-endif()
+endif ()
 
 # =============================================================================
-# 第三方库配置
+# Third-party Library Configuration
 # =============================================================================
 
 find_package(Threads REQUIRED)
 find_package(ZeroMQ CONFIG REQUIRED)
 find_package(curl CONFIG REQUIRED)
 
-# LZMA配置
+# LZMA Configuration
 find_path(LZMA_INCLUDE_DIR lzma.h)
 find_library(LZMA_LIBRARY NAMES lzma liblzma)
 
-if(LZMA_INCLUDE_DIR AND LZMA_LIBRARY)
+if (LZMA_INCLUDE_DIR AND LZMA_LIBRARY)
     message(STATUS "✅ liblzma: ${LZMA_LIBRARY}")
-else()
+else ()
     message(STATUS "⚠️  liblzma not found, using fallback")
-endif()
+endif ()
 
 # =============================================================================
-# 源文件配置
+# Source Files Configuration
 # =============================================================================
 
 add_library(src SHARED
@@ -93,10 +102,11 @@ add_library(src SHARED
         semantic_query_engine.cpp
         semantic_query_engine.h
         training_interval.cu
+        gpu_containers.cuh
 )
 
 # =============================================================================
-# 编译选项
+# Compilation Options
 # =============================================================================
 
 target_compile_options(src
@@ -113,7 +123,7 @@ target_compile_definitions(src
 )
 
 # =============================================================================
-# 包含路径配置
+# Include Path Configuration
 # =============================================================================
 
 set(CUTLASS_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cutlass")
@@ -131,35 +141,35 @@ target_include_directories(src
 )
 
 # =============================================================================
-# 🎯 库链接配置（统一在这里，使用PRIVATE关键字）
+# 🎯 Library Linking Configuration (Unified here with PRIVATE keyword)
 # =============================================================================
 
 target_link_libraries(src
         PRIVATE
-        # CUDA库
+        # CUDA libraries
         CUDA::cudart
         CUDA::curand
         CUDA::cublas
 
-        # Python库
+        # Python libraries
         ${Python3_LIBRARIES}
 
-        # Windows系统库
+        # Windows system libraries
         ws2_32
         kernel32
         user32
 
-        # 第三方库
+        # Third-party libraries
         libzmq
         CURL::libcurl
         Threads::Threads
 
-        # LZMA（如果找到）
+        # LZMA (if found)
         $<$<BOOL:${LZMA_LIBRARY}>:${LZMA_LIBRARY}>
 )
 
 # =============================================================================
-# 目标属性配置
+# Target Properties Configuration
 # =============================================================================
 
 set_target_properties(src PROPERTIES
@@ -170,15 +180,15 @@ set_target_properties(src PROPERTIES
         POSITION_INDEPENDENT_CODE ON
 )
 
-# Windows用.pyd，Linux用.so
-if(WIN32)
+# Use .pyd for Windows, .so for Linux
+if (WIN32)
     set_target_properties(src PROPERTIES SUFFIX ".pyd")
-else()
+else ()
     set_target_properties(src PROPERTIES SUFFIX ".so")
-endif()
+endif ()
 
 # =============================================================================
-# 安装配置
+# Installation Configuration
 # =============================================================================
 
 install(TARGETS src
@@ -186,24 +196,30 @@ install(TARGETS src
         RUNTIME DESTINATION ${Python3_SITELIB}
 )
 
-# =============================================================================
-# 可执行文件配置
-# =============================================================================
-
-add_executable(test_mtools test_mtools.cpp)
-target_link_libraries(test_mtools PRIVATE src)
-
-# =============================================================================
-# 输出信息
-# =============================================================================
-
-message(STATUS "")
-message(STATUS "========================================")
-message(STATUS "项目配置完成")
-message(STATUS "========================================")
-message(STATUS "输出: sintelli_base${CMAKE_SHARED_LIBRARY_SUFFIX}")
-message(STATUS "测试程序: test_mtools")
-message(STATUS "Python: ${Python3_VERSION}")
-message(STATUS "CUDA: ${CUDAToolkit_VERSION}")
-message(STATUS "========================================")
+
+# =============================================================================
+
+# Output Information
+
+# =============================================================================
+
+
+message(STATUS "")
+
+message(STATUS "========================================")
+
+message(STATUS "Project configuration completed")
+
+message(STATUS "========================================")
+
+message(STATUS "Output: sintelli_base${CMAKE_SHARED_LIBRARY_SUFFIX}")
+
+message(STATUS "Test program: test_mtools")
+
+message(STATUS "Python: ${Python3_VERSION}")
+
+message(STATUS "CUDA: ${CUDAToolkit_VERSION}")
+
+message(STATUS "========================================")
+
 message(STATUS "")
