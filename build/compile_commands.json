@@ -1,0 +1,116 @@
+[
+{
+  "directory": "E:/Sintelli/src/cmake-build-debug-visual-studio-1",
+  "command": "D:\\VS2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\cl.exe  /nologo /TP -DCROW_STANDALONE_ASIO -Dsrc_EXPORTS -ID:\\Python313\\Include -IE:\\Sintelli\\src\\cutlass\\include -IE:\\Sintelli\\src\\cutlass\\tools\\util\\include -IE:\\Sintelli\\src\\json -IE:\\Sintelli\\src\\onnx\\include -IE:\\Sintelli\\src\\zmq\\include -external:ID:\\CUDA\\include -external:ID:\\CUDA\\include\\cccl -external:IE:\\Sintelli\\src\\cmake-build-debug-visual-studio-1\\vcpkg_installed\\x64-windows\\include -external:W0 /DWIN32 /D_WINDOWS /GR /EHsc /Zi /Ob0 /Od /RTC1 -std:c++20 -MDd /FoCMakeFiles\\src.dir\\deviceQueue.cpp.obj /FdCMakeFiles\\src.dir\\ /FS -c E:\\Sintelli\\src\\deviceQueue.cpp",
+  "file": "E:/Sintelli/src/deviceQueue.cpp",
+  "output": "E:/Sintelli/src/cmake-build-debug-visual-studio-1/CMakeFiles/src.dir/deviceQueue.cpp.obj"
+},
+{
+  "directory": "E:/Sintelli/src/cmake-build-debug-visual-studio-1",
+  "command": "D:\\VS2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\cl.exe  /nologo /TP -DCROW_STANDALONE_ASIO -Dsrc_EXPORTS -ID:\\Python313\\Include -IE:\\Sintelli\\src\\cutlass\\include -IE:\\Sintelli\\src\\cutlass\\tools\\util\\include -IE:\\Sintelli\\src\\json -IE:\\Sintelli\\src\\onnx\\include -IE:\\Sintelli\\src\\zmq\\include -external:ID:\\CUDA\\include -external:ID:\\CUDA\\include\\cccl -external:IE:\\Sintelli\\src\\cmake-build-debug-visual-studio-1\\vcpkg_installed\\x64-windows\\include -external:W0 /DWIN32 /D_WINDOWS /GR /EHsc /Zi /Ob0 /Od /RTC1 -std:c++20 -MDd /FoCMakeFiles\\src.dir\\matrixMultiplex.cpp.obj /FdCMakeFiles\\src.dir\\ /FS -c E:\\Sintelli\\src\\matrixMultiplex.cpp",
+  "file": "E:/Sintelli/src/matrixMultiplex.cpp",
+  "output": "E:/Sintelli/src/cmake-build-debug-visual-studio-1/CMakeFiles/src.dir/matrixMultiplex.cpp.obj"
+},
+{
+  "directory": "E:/Sintelli/src/cmake-build-debug-visual-studio-1",
+  "command": "D:\\VS2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\cl.exe  /nologo /TP -DCROW_STANDALONE_ASIO -Dsrc_EXPORTS -ID:\\Python313\\Include -IE:\\Sintelli\\src\\cutlass\\include -IE:\\Sintelli\\src\\cutlass\\tools\\util\\include -IE:\\Sintelli\\src\\json -IE:\\Sintelli\\src\\onnx\\include -IE:\\Sintelli\\src\\zmq\\include -external:ID:\\CUDA\\include -external:ID:\\CUDA\\include\\cccl -external:IE:\\Sintelli\\src\\cmake-build-debug-visual-studio-1\\vcpkg_installed\\x64-windows\\include -external:W0 /DWIN32 /D_WINDOWS /GR /EHsc /Zi /Ob0 /Od /RTC1 -std:c++20 -MDd /FoCMakeFiles\\src.dir\\queue.cpp.obj /FdCMakeFiles\\src.dir\\ /FS -c E:\\Sintelli\\src\\queue.cpp",
+  "file": "E:/Sintelli/src/queue.cpp",
+  "output": "E:/Sintelli/src/cmake-build-debug-visual-studio-1/CMakeFiles/src.dir/queue.cpp.obj"
+},
+{
+  "directory": "E:/Sintelli/src/cmake-build-debug-visual-studio-1",
+  "command": "D:\\CUDA\\bin\\nvcc.exe -forward-unknown-to-host-compiler -DCROW_STANDALONE_ASIO -Dsrc_EXPORTS -ID:\\Python313\\Include -IE:\\Sintelli\\src\\cutlass\\include -IE:\\Sintelli\\src\\cutlass\\tools\\util\\include -IE:\\Sintelli\\src\\json -IE:\\Sintelli\\src\\onnx\\include -IE:\\Sintelli\\src\\zmq\\include -isystem D:\\CUDA\\include -isystem D:\\CUDA\\include\\cccl -isystem E:\\Sintelli\\src\\cmake-build-debug-visual-studio-1\\vcpkg_installed\\x64-windows\\include -D_WINDOWS -Xcompiler=\" /GR /EHsc\" -Xcompiler=\" -Zi -Ob0 -Od /RTC1\" -std=c++20 -arch=native -Xcompiler=-MDd -rdc=true -Xcompiler -fPIC -expt-relaxed-constexpr -x cu -rdc=true -c E:\\Sintelli\\src\\NeuronModel.cu -o CMakeFiles\\src.dir\\NeuronModel.cu.obj -Xcompiler=-FdCMakeFiles\\src.dir\\,-FS",
+  "file": "E:/Sintelli/src/NeuronModel.cu",
+  "output": "E:/Sintelli/src/cmake-build-debug-visual-studio-1/CMakeFiles/src.dir/NeuronModel.cu.obj"
+},
+{
+  "directory": "E:/Sintelli/src/cmake-build-debug-visual-studio-1",
+  "command": "D:\\CUDA\\bin\\nvcc.exe -forward-unknown-to-host-compiler -DCROW_STANDALONE_ASIO -Dsrc_EXPORTS -ID:\\Python313\\Include -IE:\\Sintelli\\src\\cutlass\\include -IE:\\Sintelli\\src\\cutlass\\tools\\util\\include -IE:\\Sintelli\\src\\json -IE:\\Sintelli\\src\\onnx\\include -IE:\\Sintelli\\src\\zmq\\include -isystem D:\\CUDA\\include -isystem D:\\CUDA\\include\\cccl -isystem E:\\Sintelli\\src\\cmake-build-debug-visual-studio-1\\vcpkg_installed\\x64-windows\\include -D_WINDOWS -Xcompiler=\" /GR /EHsc\" -Xcompiler=\" -Zi -Ob0 -Od /RTC1\" -std=c++20 -arch=native -Xcompiler=-MDd -rdc=true -Xcompiler -fPIC -expt-relaxed-constexpr -x cu -rdc=true -c E:\\Sintelli\\src\\Neuron.cu -o CMakeFiles\\src.dir\\Neuron.cu.obj -Xcompiler=-FdCMakeFiles\\src.dir\\,-FS",
+  "file": "E:/Sintelli/src/Neuron.cu",
+  "output": "E:/Sintelli/src/cmake-build-debug-visual-studio-1/CMakeFiles/src.dir/Neuron.cu.obj"
+},
+{
+  "directory": "E:/Sintelli/src/cmake-build-debug-visual-studio-1",
+  "command": "D:\\CUDA\\bin\\nvcc.exe -forward-unknown-to-host-compiler -DCROW_STANDALONE_ASIO -Dsrc_EXPORTS -ID:\\Python313\\Include -IE:\\Sintelli\\src\\cutlass\\include -IE:\\Sintelli\\src\\cutlass\\tools\\util\\include -IE:\\Sintelli\\src\\json -IE:\\Sintelli\\src\\onnx\\include -IE:\\Sintelli\\src\\zmq\\include -isystem D:\\CUDA\\include -isystem D:\\CUDA\\include\\cccl -isystem E:\\Sintelli\\src\\cmake-build-debug-visual-studio-1\\vcpkg_installed\\x64-windows\\include -D_WINDOWS -Xcompiler=\" /GR /EHsc\" -Xcompiler=\" -Zi -Ob0 -Od /RTC1\" -std=c++20 -arch=native -Xcompiler=-MDd -rdc=true -Xcompiler -fPIC -expt-relaxed-constexpr -x cu -rdc=true -c E:\\Sintelli\\src\\sim.cu -o CMakeFiles\\src.dir\\sim.cu.obj -Xcompiler=-FdCMakeFiles\\src.dir\\,-FS",
+  "file": "E:/Sintelli/src/sim.cu",
+  "output": "E:/Sintelli/src/cmake-build-debug-visual-studio-1/CMakeFiles/src.dir/sim.cu.obj"
+},
+{
+  "directory": "E:/Sintelli/src/cmake-build-debug-visual-studio-1",
+  "command": "D:\\VS2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\cl.exe  /nologo /TP -DCROW_STANDALONE_ASIO -Dsrc_EXPORTS -ID:\\Python313\\Include -IE:\\Sintelli\\src\\cutlass\\include -IE:\\Sintelli\\src\\cutlass\\tools\\util\\include -IE:\\Sintelli\\src\\json -IE:\\Sintelli\\src\\onnx\\include -IE:\\Sintelli\\src\\zmq\\include -external:ID:\\CUDA\\include -external:ID:\\CUDA\\include\\cccl -external:IE:\\Sintelli\\src\\cmake-build-debug-visual-studio-1\\vcpkg_installed\\x64-windows\\include -external:W0 /DWIN32 /D_WINDOWS /GR /EHsc /Zi /Ob0 /Od /RTC1 -std:c++20 -MDd /FoCMakeFiles\\src.dir\\converter.cpp.obj /FdCMakeFiles\\src.dir\\ /FS -c E:\\Sintelli\\src\\converter.cpp",
+  "file": "E:/Sintelli/src/converter.cpp",
+  "output": "E:/Sintelli/src/cmake-build-debug-visual-studio-1/CMakeFiles/src.dir/converter.cpp.obj"
+},
+{
+  "directory": "E:/Sintelli/src/cmake-build-debug-visual-studio-1",
+  "command": "D:\\VS2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\cl.exe  /nologo /TP -DCROW_STANDALONE_ASIO -Dsrc_EXPORTS -ID:\\Python313\\Include -IE:\\Sintelli\\src\\cutlass\\include -IE:\\Sintelli\\src\\cutlass\\tools\\util\\include -IE:\\Sintelli\\src\\json -IE:\\Sintelli\\src\\onnx\\include -IE:\\Sintelli\\src\\zmq\\include -external:ID:\\CUDA\\include -external:ID:\\CUDA\\include\\cccl -external:IE:\\Sintelli\\src\\cmake-build-debug-visual-studio-1\\vcpkg_installed\\x64-windows\\include -external:W0 /DWIN32 /D_WINDOWS /GR /EHsc /Zi /Ob0 /Od /RTC1 -std:c++20 -MDd /FoCMakeFiles\\src.dir\\bpe_tokenizer.cpp.obj /FdCMakeFiles\\src.dir\\ /FS -c E:\\Sintelli\\src\\bpe_tokenizer.cpp",
+  "file": "E:/Sintelli/src/bpe_tokenizer.cpp",
+  "output": "E:/Sintelli/src/cmake-build-debug-visual-studio-1/CMakeFiles/src.dir/bpe_tokenizer.cpp.obj"
+},
+{
+  "directory": "E:/Sintelli/src/cmake-build-debug-visual-studio-1",
+  "command": "D:\\VS2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\cl.exe  /nologo /TP -DCROW_STANDALONE_ASIO -Dsrc_EXPORTS -ID:\\Python313\\Include -IE:\\Sintelli\\src\\cutlass\\include -IE:\\Sintelli\\src\\cutlass\\tools\\util\\include -IE:\\Sintelli\\src\\json -IE:\\Sintelli\\src\\onnx\\include -IE:\\Sintelli\\src\\zmq\\include -external:ID:\\CUDA\\include -external:ID:\\CUDA\\include\\cccl -external:IE:\\Sintelli\\src\\cmake-build-debug-visual-studio-1\\vcpkg_installed\\x64-windows\\include -external:W0 /DWIN32 /D_WINDOWS /GR /EHsc /Zi /Ob0 /Od /RTC1 -std:c++20 -MDd /FoCMakeFiles\\src.dir\\smry.cpp.obj /FdCMakeFiles\\src.dir\\ /FS -c E:\\Sintelli\\src\\smry.cpp",
+  "file": "E:/Sintelli/src/smry.cpp",
+  "output": "E:/Sintelli/src/cmake-build-debug-visual-studio-1/CMakeFiles/src.dir/smry.cpp.obj"
+},
+{
+  "directory": "E:/Sintelli/src/cmake-build-debug-visual-studio-1",
+  "command": "D:\\VS2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\cl.exe  /nologo /TP -DCROW_STANDALONE_ASIO -Dsrc_EXPORTS -ID:\\Python313\\Include -IE:\\Sintelli\\src\\cutlass\\include -IE:\\Sintelli\\src\\cutlass\\tools\\util\\include -IE:\\Sintelli\\src\\json -IE:\\Sintelli\\src\\onnx\\include -IE:\\Sintelli\\src\\zmq\\include -external:ID:\\CUDA\\include -external:ID:\\CUDA\\include\\cccl -external:IE:\\Sintelli\\src\\cmake-build-debug-visual-studio-1\\vcpkg_installed\\x64-windows\\include -external:W0 /DWIN32 /D_WINDOWS /GR /EHsc /Zi /Ob0 /Od /RTC1 -std:c++20 -MDd /FoCMakeFiles\\src.dir\\model_process.cpp.obj /FdCMakeFiles\\src.dir\\ /FS -c E:\\Sintelli\\src\\model_process.cpp",
+  "file": "E:/Sintelli/src/model_process.cpp",
+  "output": "E:/Sintelli/src/cmake-build-debug-visual-studio-1/CMakeFiles/src.dir/model_process.cpp.obj"
+},
+{
+  "directory": "E:/Sintelli/src/cmake-build-debug-visual-studio-1",
+  "command": "D:\\VS2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\cl.exe  /nologo /TP -DCROW_STANDALONE_ASIO -Dsrc_EXPORTS -ID:\\Python313\\Include -IE:\\Sintelli\\src\\cutlass\\include -IE:\\Sintelli\\src\\cutlass\\tools\\util\\include -IE:\\Sintelli\\src\\json -IE:\\Sintelli\\src\\onnx\\include -IE:\\Sintelli\\src\\zmq\\include -external:ID:\\CUDA\\include -external:ID:\\CUDA\\include\\cccl -external:IE:\\Sintelli\\src\\cmake-build-debug-visual-studio-1\\vcpkg_installed\\x64-windows\\include -external:W0 /DWIN32 /D_WINDOWS /GR /EHsc /Zi /Ob0 /Od /RTC1 -std:c++20 -MDd /FoCMakeFiles\\src.dir\\openai_client.cpp.obj /FdCMakeFiles\\src.dir\\ /FS -c E:\\Sintelli\\src\\openai_client.cpp",
+  "file": "E:/Sintelli/src/openai_client.cpp",
+  "output": "E:/Sintelli/src/cmake-build-debug-visual-studio-1/CMakeFiles/src.dir/openai_client.cpp.obj"
+},
+{
+  "directory": "E:/Sintelli/src/cmake-build-debug-visual-studio-1",
+  "command": "D:\\VS2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\cl.exe  /nologo /TP -DCROW_STANDALONE_ASIO -Dsrc_EXPORTS -ID:\\Python313\\Include -IE:\\Sintelli\\src\\cutlass\\include -IE:\\Sintelli\\src\\cutlass\\tools\\util\\include -IE:\\Sintelli\\src\\json -IE:\\Sintelli\\src\\onnx\\include -IE:\\Sintelli\\src\\zmq\\include -external:ID:\\CUDA\\include -external:ID:\\CUDA\\include\\cccl -external:IE:\\Sintelli\\src\\cmake-build-debug-visual-studio-1\\vcpkg_installed\\x64-windows\\include -external:W0 /DWIN32 /D_WINDOWS /GR /EHsc /Zi /Ob0 /Od /RTC1 -std:c++20 -MDd /FoCMakeFiles\\src.dir\\central_router.cpp.obj /FdCMakeFiles\\src.dir\\ /FS -c E:\\Sintelli\\src\\central_router.cpp",
+  "file": "E:/Sintelli/src/central_router.cpp",
+  "output": "E:/Sintelli/src/cmake-build-debug-visual-studio-1/CMakeFiles/src.dir/central_router.cpp.obj"
+},
+{
+  "directory": "E:/Sintelli/src/cmake-build-debug-visual-studio-1",
+  "command": "D:\\VS2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\cl.exe  /nologo /TP -DCROW_STANDALONE_ASIO -Dsrc_EXPORTS -ID:\\Python313\\Include -IE:\\Sintelli\\src\\cutlass\\include -IE:\\Sintelli\\src\\cutlass\\tools\\util\\include -IE:\\Sintelli\\src\\json -IE:\\Sintelli\\src\\onnx\\include -IE:\\Sintelli\\src\\zmq\\include -external:ID:\\CUDA\\include -external:ID:\\CUDA\\include\\cccl -external:IE:\\Sintelli\\src\\cmake-build-debug-visual-studio-1\\vcpkg_installed\\x64-windows\\include -external:W0 /DWIN32 /D_WINDOWS /GR /EHsc /Zi /Ob0 /Od /RTC1 -std:c++20 -MDd /FoCMakeFiles\\src.dir\\logic_semantic_matcher.cpp.obj /FdCMakeFiles\\src.dir\\ /FS -c E:\\Sintelli\\src\\logic_semantic_matcher.cpp",
+  "file": "E:/Sintelli/src/logic_semantic_matcher.cpp",
+  "output": "E:/Sintelli/src/cmake-build-debug-visual-studio-1/CMakeFiles/src.dir/logic_semantic_matcher.cpp.obj"
+},
+{
+  "directory": "E:/Sintelli/src/cmake-build-debug-visual-studio-1",
+  "command": "D:\\CUDA\\bin\\nvcc.exe -forward-unknown-to-host-compiler -DCROW_STANDALONE_ASIO -Dsrc_EXPORTS -ID:\\Python313\\Include -IE:\\Sintelli\\src\\cutlass\\include -IE:\\Sintelli\\src\\cutlass\\tools\\util\\include -IE:\\Sintelli\\src\\json -IE:\\Sintelli\\src\\onnx\\include -IE:\\Sintelli\\src\\zmq\\include -isystem D:\\CUDA\\include -isystem D:\\CUDA\\include\\cccl -isystem E:\\Sintelli\\src\\cmake-build-debug-visual-studio-1\\vcpkg_installed\\x64-windows\\include -D_WINDOWS -Xcompiler=\" /GR /EHsc\" -Xcompiler=\" -Zi -Ob0 -Od /RTC1\" -std=c++20 -arch=native -Xcompiler=-MDd -rdc=true -Xcompiler -fPIC -expt-relaxed-constexpr -x cu -rdc=true -c E:\\Sintelli\\src\\GPUMutex.cu -o CMakeFiles\\src.dir\\GPUMutex.cu.obj -Xcompiler=-FdCMakeFiles\\src.dir\\,-FS",
+  "file": "E:/Sintelli/src/GPUMutex.cu",
+  "output": "E:/Sintelli/src/cmake-build-debug-visual-studio-1/CMakeFiles/src.dir/GPUMutex.cu.obj"
+},
+{
+  "directory": "E:/Sintelli/src/cmake-build-debug-visual-studio-1",
+  "command": "D:\\VS2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\cl.exe  /nologo /TP -DCROW_STANDALONE_ASIO -Dsrc_EXPORTS -ID:\\Python313\\Include -IE:\\Sintelli\\src\\cutlass\\include -IE:\\Sintelli\\src\\cutlass\\tools\\util\\include -IE:\\Sintelli\\src\\json -IE:\\Sintelli\\src\\onnx\\include -IE:\\Sintelli\\src\\zmq\\include -external:ID:\\CUDA\\include -external:ID:\\CUDA\\include\\cccl -external:IE:\\Sintelli\\src\\cmake-build-debug-visual-studio-1\\vcpkg_installed\\x64-windows\\include -external:W0 /DWIN32 /D_WINDOWS /GR /EHsc /Zi /Ob0 /Od /RTC1 -std:c++20 -MDd /FoCMakeFiles\\src.dir\\rag_knowledge_loader.cpp.obj /FdCMakeFiles\\src.dir\\ /FS -c E:\\Sintelli\\src\\rag_knowledge_loader.cpp",
+  "file": "E:/Sintelli/src/rag_knowledge_loader.cpp",
+  "output": "E:/Sintelli/src/cmake-build-debug-visual-studio-1/CMakeFiles/src.dir/rag_knowledge_loader.cpp.obj"
+},
+{
+  "directory": "E:/Sintelli/src/cmake-build-debug-visual-studio-1",
+  "command": "D:\\VS2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\cl.exe  /nologo /TP -DCROW_STANDALONE_ASIO -Dsrc_EXPORTS -ID:\\Python313\\Include -IE:\\Sintelli\\src\\cutlass\\include -IE:\\Sintelli\\src\\cutlass\\tools\\util\\include -IE:\\Sintelli\\src\\json -IE:\\Sintelli\\src\\onnx\\include -IE:\\Sintelli\\src\\zmq\\include -external:ID:\\CUDA\\include -external:ID:\\CUDA\\include\\cccl -external:IE:\\Sintelli\\src\\cmake-build-debug-visual-studio-1\\vcpkg_installed\\x64-windows\\include -external:W0 /DWIN32 /D_WINDOWS /GR /EHsc /Zi /Ob0 /Od /RTC1 -std:c++20 -MDd /FoCMakeFiles\\src.dir\\feature_extractor.cpp.obj /FdCMakeFiles\\src.dir\\ /FS -c E:\\Sintelli\\src\\feature_extractor.cpp",
+  "file": "E:/Sintelli/src/feature_extractor.cpp",
+  "output": "E:/Sintelli/src/cmake-build-debug-visual-studio-1/CMakeFiles/src.dir/feature_extractor.cpp.obj"
+},
+{
+  "directory": "E:/Sintelli/src/cmake-build-debug-visual-studio-1",
+  "command": "D:\\CUDA\\bin\\nvcc.exe -forward-unknown-to-host-compiler -DCROW_STANDALONE_ASIO -Dsrc_EXPORTS -ID:\\Python313\\Include -IE:\\Sintelli\\src\\cutlass\\include -IE:\\Sintelli\\src\\cutlass\\tools\\util\\include -IE:\\Sintelli\\src\\json -IE:\\Sintelli\\src\\onnx\\include -IE:\\Sintelli\\src\\zmq\\include -isystem D:\\CUDA\\include -isystem D:\\CUDA\\include\\cccl -isystem E:\\Sintelli\\src\\cmake-build-debug-visual-studio-1\\vcpkg_installed\\x64-windows\\include -D_WINDOWS -Xcompiler=\" /GR /EHsc\" -Xcompiler=\" -Zi -Ob0 -Od /RTC1\" -std=c++20 -arch=native -Xcompiler=-MDd -rdc=true -Xcompiler -fPIC -expt-relaxed-constexpr -x cu -rdc=true -c E:\\Sintelli\\src\\python_binding.cu -o CMakeFiles\\src.dir\\python_binding.cu.obj -Xcompiler=-FdCMakeFiles\\src.dir\\,-FS",
+  "file": "E:/Sintelli/src/python_binding.cu",
+  "output": "E:/Sintelli/src/cmake-build-debug-visual-studio-1/CMakeFiles/src.dir/python_binding.cu.obj"
+},
+{
+  "directory": "E:/Sintelli/src/cmake-build-debug-visual-studio-1",
+  "command": "D:\\VS2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\cl.exe  /nologo /TP -DCROW_STANDALONE_ASIO -Dsrc_EXPORTS -ID:\\Python313\\Include -IE:\\Sintelli\\src\\cutlass\\include -IE:\\Sintelli\\src\\cutlass\\tools\\util\\include -IE:\\Sintelli\\src\\json -IE:\\Sintelli\\src\\onnx\\include -IE:\\Sintelli\\src\\zmq\\include -external:ID:\\CUDA\\include -external:ID:\\CUDA\\include\\cccl -external:IE:\\Sintelli\\src\\cmake-build-debug-visual-studio-1\\vcpkg_installed\\x64-windows\\include -external:W0 /DWIN32 /D_WINDOWS /GR /EHsc /Zi /Ob0 /Od /RTC1 -std:c++20 -MDd /FoCMakeFiles\\src.dir\\semantic_query_engine.cpp.obj /FdCMakeFiles\\src.dir\\ /FS -c E:\\Sintelli\\src\\semantic_query_engine.cpp",
+  "file": "E:/Sintelli/src/semantic_query_engine.cpp",
+  "output": "E:/Sintelli/src/cmake-build-debug-visual-studio-1/CMakeFiles/src.dir/semantic_query_engine.cpp.obj"
+},
+{
+  "directory": "E:/Sintelli/src/cmake-build-debug-visual-studio-1",
+  "command": "D:\\CUDA\\bin\\nvcc.exe -forward-unknown-to-host-compiler -DCROW_STANDALONE_ASIO -Dsrc_EXPORTS -ID:\\Python313\\Include -IE:\\Sintelli\\src\\cutlass\\include -IE:\\Sintelli\\src\\cutlass\\tools\\util\\include -IE:\\Sintelli\\src\\json -IE:\\Sintelli\\src\\onnx\\include -IE:\\Sintelli\\src\\zmq\\include -isystem D:\\CUDA\\include -isystem D:\\CUDA\\include\\cccl -isystem E:\\Sintelli\\src\\cmake-build-debug-visual-studio-1\\vcpkg_installed\\x64-windows\\include -D_WINDOWS -Xcompiler=\" /GR /EHsc\" -Xcompiler=\" -Zi -Ob0 -Od /RTC1\" -std=c++20 -arch=native -Xcompiler=-MDd -rdc=true -Xcompiler -fPIC -expt-relaxed-constexpr -x cu -rdc=true -c E:\\Sintelli\\src\\training_interval.cu -o CMakeFiles\\src.dir\\training_interval.cu.obj -Xcompiler=-FdCMakeFiles\\src.dir\\,-FS",
+  "file": "E:/Sintelli/src/training_interval.cu",
+  "output": "E:/Sintelli/src/cmake-build-debug-visual-studio-1/CMakeFiles/src.dir/training_interval.cu.obj"
+}
+]
