@@ -61,7 +61,7 @@ struct KFE_STM_Slot {
     std::string hash() const {
         return sha256_hash<KFE_STM_Slot>(*this);
     }
-    void conv() {
+    __device__ void conv() {
         ConvResidualProcessor::conv2d_16x16(Vmem, ConvKernel16(), conv16);
     }
 };

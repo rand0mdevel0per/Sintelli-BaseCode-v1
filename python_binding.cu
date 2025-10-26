@@ -271,7 +271,7 @@ static PyObject *py_get_next_output_img(PyObject *self, PyObject *args) {
 
 static PyObject *py_get_model_stats(PyObject *self, PyObject *args) {
     ull neuron_id = 0;
-    if (!PyArg_ParseTuple(args, "|i", neuron_id)) {
+    if (!PyArg_ParseTuple(args, "|l", neuron_id)) {
         cerr << "ERROR: Missing neuron_id" << endl;
         Py_RETURN_NONE;
     }

@@ -90,7 +90,8 @@ std::string runPythonCode(const std::string &code) {
 // Mathematical calculation function using sympy for symbolic computation
 std::string calculateMathExpression(const std::string &expression) {
     // Ensure sympy is installed
-    std::string install_code = "("
+    std::string install_code =
+            "#Python code"
             "import subprocess\n"
             "import sys\n"
             "try:\n"
@@ -106,7 +107,8 @@ std::string calculateMathExpression(const std::string &expression) {
     std::string install_result = runPythonCode(install_code);
 
     // Mathematical calculation code
-    std::string math_code = R"("
+    std::string math_code =
+            "#Python code"
             "import sys\n"
             "import math\n"
             "import sympy as sp\n"
@@ -490,11 +492,11 @@ struct reply_trc {
     float confidence;
     std::string reasoning;
 
-    static void to_json(nlohmann::json& j, const reply_trc& t) {
+    static void to_json(nlohmann::json &j, const reply_trc &t) {
         j = json{
             {"score", t.score},
             {"reply", t.reply},
-            {"is_a_checkpoint",t.is_a_checkpoint},
+            {"is_a_checkpoint", t.is_a_checkpoint},
             {"test_mode", t.test_mode},
             {"need_rollback", t.need_rollback},
             {"confidence", t.confidence},
@@ -502,8 +504,8 @@ struct reply_trc {
         };
     }
 
-    static void from_json(const nlohmann::json& j, reply_trc& t ) {
-        try{
+    static void from_json(const nlohmann::json &j, reply_trc &t) {
+        try {
             j.at("score").get_to(t.score);
             j.at("reply").get_to(t.reply);
             j.at("is_a_checkpoint").get_to(t.is_a_checkpoint);
@@ -565,7 +567,7 @@ void run_training(NeuronModel *model, const std::string &api_key, const std::str
             "<tool_begin>[tool_id_beg]TOOL_ID[tool_id_end][tool_content_beg]QUERY_OR_CODE[tool_content_end]<tool_end>\n"
             "\n"
             "ENHANCED TOOL SUITE:\n"
-            "• Claude Sonnet 4.5 (acs45) - Advanced reasoning and complex problem-solving,VERY expensive\n"
+            "• Claude Haiku 4.5 (ach45) - Advanced reasoning and complex problem-solving,VERY expensive\n"
             "• Mathematical Engine (mtools) - LaTeX parsing, symbolic math, calculations\n"
             "• Python Environment (pytools) - Code execution, data analysis, simulations\n"
             "• Search Engine (stools) - Web search across Baidu, Bing, and academic sources\n"
@@ -696,14 +698,14 @@ void run_training(NeuronModel *model, const std::string &api_key, const std::str
             std::transform(lower_input.begin(), lower_input.end(), lower_input.begin(), ::tolower);
             if (lower_input.find("<tool_begin>") != std::string::npos) {
                 auto tool_calls = parseToolCall(response);
-                if (tool_calls.first == "acs45") {
+                if (tool_calls.first == "ach45") {
                     auto rmsg = OpenAIClient::ChatCompletionRequest{
-                        "anthropic/claude-sonnet-4.5", {{"user", tool_calls.second}}
+                        "anthropic/claude-haiku-4.5", {{"user", tool_calls.second}}
                     };
                     std::string resp_ = streamPerformingOpenAIAPI(client, rmsg);
                     req.messages.emplace_back("user", "<tool_response_begin>\n"
-                                                      "<tool_id>acs45</tool_id>\n"
-                                                      "<tool_name>Anthropic Claude Sonnet 4.5</tool_name>\n"
+                                                      "<tool_id>ach45</tool_id>\n"
+                                                      "<tool_name>Anthropic Claude Haiku 4.5</tool_name>\n"
                                                       "<tool_type>LLM</tool_type>\n"
                                                       "<tool_response>" + resp_ + "</tool_response>\n"
                                                       "<tool_response_end>");
@@ -816,7 +818,8 @@ void run_training(NeuronModel *model, const std::string &api_key, const std::str
                                                           "<tool_response_end>");
                     }
                 } else if (tool_calls.first == "stools") {
-                    std::string search_res = performSearch(tool_calls.second, bing_api_key, google_api_key, google_engine_id);
+                    std::string search_res = performSearch(tool_calls.second, bing_api_key, google_api_key,
+                                                           google_engine_id);
                     req.messages.emplace_back("user", "<tool_response_begin>\n"
                                                       "<tool_id>stools</tool_id>\n"
                                                       "<tool_name>Web Search Engine</tool_name>\n"
@@ -839,10 +842,10 @@ void run_training(NeuronModel *model, const std::string &api_key, const std::str
                                               "<error_end>");
                 }
             } else {
-                try{
+                try {
                     auto resp_json = json::parse(response);
                     reply_trc resp;
-                    reply_trc::from_json(resp_json,resp);
+                    reply_trc::from_json(resp_json, resp);
                     inp.has_text = true;
                     inp.text = resp.reply;
                     model->update_score(resp.score * resp.confidence);
@@ -859,7 +862,7 @@ void run_training(NeuronModel *model, const std::string &api_key, const std::str
                     if (resp.need_rollback && resp.confidence > 0.5) {
                         model->load();
                     }
-                } catch (exception& e) {
+                } catch (exception &e) {
                     cerr << "Error: " << e.what() << endl;
                 }
             }
@@ -871,7 +874,7 @@ void run_training(NeuronModel *model, const std::string &api_key, const std::str
                 req.messages.erase(req.messages.begin() + 1);
             }
         }
-        model->input(inp,"user");
+        model->input(inp, "user");
     }
     model->save();
     model->disable_training_mode();
