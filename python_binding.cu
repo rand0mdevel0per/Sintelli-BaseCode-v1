@@ -269,6 +269,20 @@ static PyObject *py_get_next_output_img(PyObject *self, PyObject *args) {
     Py_RETURN_NONE;
 }
 
+static PyObject *py_get_model_stats(PyObject *self, PyObject *args) {
+    ull neuron_id = 0;
+    if (!PyArg_ParseTuple(args, "|i", neuron_id)) {
+        cerr << "ERROR: Missing neuron_id" << endl;
+        Py_RETURN_NONE;
+    }
+    try {
+        auto ret = g_model->get_n_stats(neuron_id).to_json().dump();
+        return PyUnicode_FromString(ret.c_str());
+    } catch (...) {
+        Py_RETURN_NONE;
+    }
+}
+
 // 11. Check if image output is available
 static PyObject *py_has_output_img(PyObject *self, PyObject *args) {
     std::lock_guard<std::mutex> lock(g_output_img_mut);
@@ -344,7 +358,8 @@ static PyObject *py_run_native_training(PyObject *self, PyObject *args) {
     const char *openrouter_api = "";
     const char *name = "Sydney";
 
-    if (!stop_training) Py_RETURN_FALSE;
+    if (!stop_training)
+        Py_RETURN_FALSE;
 
     if (!PyArg_ParseTuple(args, "|sssss", bing_api, google_api, google_eng, openrouter_api, name)) {
         if (bing_api == "") {
@@ -360,11 +375,11 @@ static PyObject *py_run_native_training(PyObject *self, PyObject *args) {
         }
     }
 
-    try{
+    try {
         thd_training = std::thread([bing_api, google_api, google_eng, openrouter_api, name]() {
-           stop_training = false;
-           run_training(g_model, bing_api, name, google_api, google_eng, openrouter_api, &stop_training);
-       });
+            stop_training = false;
+            run_training(g_model, bing_api, name, google_api, google_eng, openrouter_api, &stop_training);
+        });
         //thd_training.detach();
     } catch (...) {
         Py_RETURN_FALSE;
@@ -374,13 +389,14 @@ static PyObject *py_run_native_training(PyObject *self, PyObject *args) {
 
 static PyObject *py_stop_native_training(PyObject *self, PyObject *args) {
     if (!stop_training) {
-        try{
+        try {
             stop_training = true;
             thd_training.join();
         } catch (...) {
             Py_RETURN_FALSE;
         }
-    } else Py_RETURN_FALSE;
+    } else
+        Py_RETURN_FALSE;
     Py_RETURN_TRUE;
 }
 
@@ -533,11 +549,23 @@ static PyMethodDef NeuronMethods[] = {
         "   bool: True if success"
     },
 
-    {"stop_native_training", py_stop_native_training, METH_VARARGS,
+    {
+        "stop_native_training", py_stop_native_training, METH_VARARGS,
         "Stop CUDA C++ side builtin native training\n"
         "\n"
         "Returns:\n"
         "   bool: True if success"
+    },
+    {
+        "get_model_neuron_status", py_get_model_stats, METH_VARARGS,
+        "Get the status information of specified Neuron\n"
+        "Formatted in json\n"
+        "\n"
+        "Args:\n"
+        "   neuron_id{int): The Id of the neuron\n"
+        "\n"
+        "Returns:\n"
+        "   str or None"
     },
 
     {nullptr, nullptr, 0, nullptr}

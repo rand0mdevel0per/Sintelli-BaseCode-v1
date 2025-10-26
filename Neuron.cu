@@ -35,9 +35,28 @@
 #include "GPUMutex.cu"
 #include <cuda_fp16.hpp>
 #include "gpu_containers.cuh"
+#include "nlohmann/json.hpp"
 
 #define ll long long
 #define ull unsigned ll
+
+struct NeuronStats {
+    bool training;
+    double activity;
+    ll port_counts[4];
+    double core_vul;
+    double importance;
+
+    nlohmann::json to_json() {
+        return nlohmann::json{
+                {"training", training},
+                {"activity", activity},
+                {"port_counts",port_counts},
+                {"core_vul",core_vul},
+                {"importance",importance}
+        };
+    }
+};
 
 /**
  * @brief Neuron class representing a single computational unit in the neural network.
@@ -229,6 +248,18 @@ public:
 
     [[nodiscard]] double get_activity() const {
         return activity;
+    }
+
+    NeuronStats get_stats() {
+        auto stats = NeuronStats{
+            training, activity, port_counts[0],
+            port_counts[1],
+            port_counts[2],
+            port_counts[3],
+            core_vulnerability,
+            importance
+        };
+        return stats;
     }
 
     bool inject(NeuronInput inp, int port) {
