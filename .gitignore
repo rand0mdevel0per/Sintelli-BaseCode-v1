@@ -44,7 +44,7 @@ cmake_install.cmake
 *.cmake
 
 # Compilation databases
-compile_commands.json
+build/compile_commands.json
 
 # Logs and temporary files
 *.log

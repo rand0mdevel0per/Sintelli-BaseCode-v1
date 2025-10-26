@@ -45,7 +45,8 @@ struct Statistics {
 
 // ===== 特征向量类型定义 =====
 template<typename T>
-struct FeatureVector {
+class FeatureVector {
+public:
     std::vector<T> data;
     size_t dimension;
     std::string feature_type;
@@ -458,7 +459,7 @@ public:
     ExternalStorage(const ExternalStorage& other) {
         l2_memory_pool = other.l2_memory_pool;
         l2_max_size = other.l2_max_size;
-        heat_index = other.heat_index;
+        *heat_index = (*other.heat_index);
         descriptor_map = other.descriptor_map;
         hash_to_slot = other.hash_to_slot;
         feature_index = other.feature_index;
@@ -494,7 +495,7 @@ public:
     // 存储数据(带特征向量) 喵
     template<typename = std::enable_if_t<
         std::is_invocable_r_v<std::string, decltype(&T::hash), T>>>
-    uint64_t store(const T& data, const FeatureVector<float>& feature, double initial_heat = 1.0) {
+    uint64_t store(const T& data, const ::FeatureVector<float>& feature, double initial_heat = 1.0) {
         return storeWithFeature(data, feature, initial_heat);
     }
 
@@ -616,7 +617,7 @@ public:
     // 存储数据并关联特征向量 喵
     template<typename = std::enable_if_t<
         std::is_invocable_r_v<std::string, decltype(&T::hash), T>>>
-    uint64_t storeWithFeature(const T& data, const FeatureVector<float>& feature, double initial_heat = 1.0) {
+    uint64_t storeWithFeature(const T& data, const ::FeatureVector<float>& feature, double initial_heat = 1.0) {
         std::lock_guard<std::mutex> lock(storage_mutex);
 
         // 获取数据的hash值
@@ -668,7 +669,7 @@ public:
 
     // 通过特征向量查找最相似的K个数据 喵
     std::vector<std::pair<uint64_t, double>> findSimilarByFeature(
-        const FeatureVector<float>& query_feature, 
+        const ::FeatureVector<float>& query_feature, 
         int k = 10, 
         double similarity_threshold = 0.0,
         const std::string& distance_metric = "cosine") {
@@ -687,7 +688,7 @@ public:
             if (fetchInternal(const_cast<DataDescriptor&>(desc), data)) {
                 // 这里需要数据对象有getFeature()方法来获取特征向量
                 // 假设T类型有getFeature()方法返回FeatureVector<float>
-                FeatureVector<float> stored_feature = data.getFeature();
+                ::FeatureVector<float> stored_feature = data.getFeature();
                 
                 double similarity = 0.0;
                 if (distance_metric == "cosine") {
@@ -734,7 +735,7 @@ public:
     template<typename = std::enable_if_t<
         std::is_invocable_r_v<std::string, decltype(&T::hash), T>>>
     std::vector<uint64_t> batchStoreWithFeatures(
-        const std::vector<std::pair<T, FeatureVector<float>>>& data_features,
+        const std::vector<std::pair<T, ::FeatureVector<float>>>& data_features,
         double initial_heat = 1.0) {
         
         std::vector<uint64_t> slot_ids;
@@ -1100,14 +1101,14 @@ private:
     }
 
     // 计算特征向量hash 喵
-    std::string computeFeatureHash(const FeatureVector<float>& feature) const {
+    std::string computeFeatureHash(const ::FeatureVector<float>& feature) const {
         // 使用简单的hash算法,实际应用中可以使用更复杂的hash
         std::hash<std::string> hasher;
         return std::to_string(hasher(feature.serialize()));
     }
 
     // 更新已存在的数据(带特征) 喵
-    uint64_t updateExistingWithFeature(uint64_t slot_id, const T& data, const FeatureVector<float>& feature, double heat) {
+    uint64_t updateExistingWithFeature(uint64_t slot_id, const T& data, const ::FeatureVector<float>& feature, double heat) {
         auto it = descriptor_map.find(slot_id);
         if (it == descriptor_map.end()) return slot_id;
 
@@ -1157,11 +1158,11 @@ private:
 
     // 更新已存在的数据 喵
     uint64_t updateExisting(uint64_t slot_id, const T& data, double heat) {
-        return updateExistingWithFeature(slot_id, data, FeatureVector<float>(), heat);
+        return updateExistingWithFeature(slot_id, data, ::FeatureVector<float>(), heat);
     }
 
     // 更新已存在的数据(带特征) 喵
-    uint64_t updateExisting(uint64_t slot_id, const T& data, const FeatureVector<float>& feature, double heat) {
+    uint64_t updateExisting(uint64_t slot_id, const T& data, const ::FeatureVector<float>& feature, double heat) {
         return updateExistingWithFeature(slot_id, data, feature, heat);
     }
 
