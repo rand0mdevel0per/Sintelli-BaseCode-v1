@@ -19,6 +19,11 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
+      - name: Configure CMake
+        run: |
+          mkdir build
+          cd build
+          cmake .. -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
       - name: 'Qodana Scan'
         uses: JetBrains/qodana-action@v2025.2
         with:
