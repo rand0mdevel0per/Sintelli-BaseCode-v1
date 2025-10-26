@@ -32,6 +32,7 @@
 #include "structs.h"
 #include "sim.cu"
 #include "GPUMutex.cu"
+#include <cuda_fp16.hpp>
 
 #define ll long long
 #define ull unsigned ll
@@ -74,7 +75,8 @@ public:
      * Sets up connections, random state, and prepares neuron for operation
      */
     Neuron(DeviceQueue<Message, 32> *queues[6], ll coord[3], ull seed, DeviceQueue<Message, 32> *queue_ptr,
-        DeviceQueue<KFE_STM_Slot, 32>* storage_queue, DeviceQueue<std::string, 32>* query_queue, DeviceQueue<KFE_STM_Slot, 32>* result_queue) {
+           DeviceQueue<KFE_STM_Slot, 32> *storage_queue, DeviceQueue<std::string, 32> *query_queue,
+           DeviceQueue<KFE_STM_Slot, 32> *result_queue) {
         encoder = MessageEncoder();
         decoder = MessageDecoder();
         importance = 0;
@@ -82,7 +84,7 @@ public:
             neighbour_queues[i] = queues[i]; // 保存指针
         }
         queue = queue_ptr;
-        
+
         // 初始化KFE存储队列
         this->kfe_storage_queue = storage_queue;
         this->kfe_query_queue = query_queue;
@@ -191,12 +193,13 @@ public:
         return true;
     }
 
-    [[nodiscard]] double get_noise() const {return noise;}
-    [[nodiscard]] double get_learn_rt() const {return learn;}
+    [[nodiscard]] double get_noise() const { return noise; }
+    [[nodiscard]] double get_learn_rt() const { return learn; }
 
     void set_noise(double new_ns) {
         noise = new_ns;
     }
+
     void set_learn_rt(double new_rt) {
         learn = new_rt;
     }
@@ -242,33 +245,33 @@ public:
     }
 
     bool is_active() {
-        for (auto &port : port_in) {
+        for (auto &port: port_in) {
             if (!port.empty()) {
                 return true;
             }
         }
         return false;
     }
-    
+
     // ===== Single Step Execution Interface =====
     /**
      * @enum StepMode
      * @brief Neuron single step execution phase enumeration
-     * 
+     *
      * Defines the sequential phases of neuron computation in a single step.
      * Each phase represents a distinct computational task in the neuron lifecycle.
      */
     enum StepMode {
-        STEP_MESSAGE_PROCESSING,    // 消息处理阶段
-        STEP_INPUT_PROCESSING,      // 输入处理阶段
-        STEP_INFERENCE,             // 推理计算阶段
-        STEP_OUTPUT_BROADCAST,      // 输出广播阶段
-        STEP_MAINTENANCE            // 维护任务阶段
+        STEP_MESSAGE_PROCESSING, // 消息处理阶段
+        STEP_INPUT_PROCESSING, // 输入处理阶段
+        STEP_INFERENCE, // 推理计算阶段
+        STEP_OUTPUT_BROADCAST, // 输出广播阶段
+        STEP_MAINTENANCE // 维护任务阶段
     };
-    
+
     /**
      * @brief Execute single step neuron computation.
-     * 
+     *
      * @details
      * Executes neuron computation in the following sequential phases:
      * 1. Message Processing - Handle incoming messages from other neurons
@@ -276,15 +279,15 @@ public:
      * 3. Inference - Perform GEMM/DRC inference calculations
      * 4. Output Broadcast - Send results to connected neurons
      * 5. Maintenance - Update internal state and perform housekeeping
-     * 
+     *
      * @return StepMode Current execution phase
-     * 
+     *
      * @note Executed on CUDA device, ensuring all operations are thread-safe
      * This function is the core computational unit of each neuron.
      */
     __device__ StepMode step() {
         StepMode current_step = STEP_MESSAGE_PROCESSING;
-        
+
         // 1. 处理消息队列
         if (queue && !queue->empty()) {
             Message msg_cache{};
@@ -293,7 +296,7 @@ public:
                 current_step = STEP_INPUT_PROCESSING;
             }
         }
-        
+
         // 2. 处理输入端口数据
         if (current_step == STEP_INPUT_PROCESSING) {
             bool has_input = false;
@@ -304,42 +307,32 @@ public:
                 }
             }
             if (has_input) {
-                current_step = STEP_INFERENCE;
+                current_step = STEP_OUTPUT_BROADCAST;
             } else {
                 current_step = STEP_MAINTENANCE;
             }
         }
-        
-        // 3. 执行推理计算
-        if (current_step == STEP_INFERENCE) {
-            if (shouldTriggerGEMM()) {
-                executeGEMMAndDRC();
-            } else {
-                executeMicroCorrection();
-            }
-            current_step = STEP_OUTPUT_BROADCAST;
-        }
-        
+
         // 4. 广播输出
         if (current_step == STEP_OUTPUT_BROADCAST) {
             broadcastOutput();
-            
+
             // 更新卷积核
             for (int p = 0; p < 4; p++) {
                 updateConvKernels(p);
             }
             current_step = STEP_MAINTENANCE;
         }
-        
+
         // 5. 维护任务
         if (current_step == STEP_MAINTENANCE) {
             cycle_counter++;
-            
+
             // KFE衰减(每10步)
             if (cycle_counter % 10 == 0) {
                 kfeDecay();
             }
-            
+
             // 神经元发现(每100步)
             static int neuron_discover_countdown = 100;
             neuron_discover_countdown--;
@@ -349,31 +342,31 @@ public:
                 }
                 neuron_discover_countdown = 100;
             }
-            
+
             // 端口变换矩阵更新(每50步)
             if (cycle_counter % 50 == 0) {
                 updateMultiplexMatrices();
             }
-            
+
             // 更新活跃度
             updateActivity();
         }
-        
+
         return current_step;
     }
-    
+
     /**
      * @brief Determine whether to execute full GEMM inference.
-     * 
+     *
      * @details
      * Decides whether to trigger full GEMM inference based on multiple factors:
      * 1. Periodic heartbeat (every 16 steps) - Regular full computation
      * 2. High external input variation (high prediction error) - Significant changes require full processing
      * 3. High internal core vulnerability - Instability requires robust computation
      * 4. High short-term memory aggregate utility - Contextual knowledge importance
-     * 
+     *
      * @return bool true if full GEMM inference is needed, false for lightweight micro-correction
-     * 
+     *
      * This gating mechanism optimizes computational efficiency by:
      * - Using lightweight micro-corrections for stable states
      * - Triggering full GEMM computations when significant changes occur
@@ -384,7 +377,7 @@ public:
         if (cycle_counter % 16 == 0) {
             return true;
         }
-        
+
         // 外部高需求
         double deviation_norm = 0.0;
         for (int i = 0; i < 256; i++) {
@@ -396,32 +389,32 @@ public:
         if (deviation_norm > 0.5) {
             return true;
         }
-        
+
         // 内部危机
         if (core_vulnerability > 0.7) {
             return true;
         }
-        
+
         // 内部注意力
         if (STM_aggregate_utility > 0.6) {
             return true;
         }
-        
+
         return false;
     }
-    
+
     /**
      * @brief 检查神经元是否有待处理的工作
-     * 
+     *
      * @details
      * 通过检查消息队列和输入端口来判断是否有待处理的工作项
-     * 
+     *
      * @return bool true表示有待处理的工作，false表示空闲
      */
     __device__ bool hasPendingWork() const {
         return (queue && !queue->empty()) || checkPortsForInput();
     }
-    
+
     // 检查端口是否有输入
     __device__ bool checkPortsForInput() const {
         for (int p = 0; p < 4; p++) {
@@ -431,21 +424,21 @@ public:
         }
         return false;
     }
-    
+
     /**
      * @brief 获取神经元的当前状态信息
-     * 
+     *
      * @param[out] act 当前活跃度
      * @param[out] cycles 运行周期计数器
      * @param[out] vulnerability 核心脆弱性指标
      * @param[out] utility STM聚合效用
      * @param[out] in_conn 输入连接数
      * @param[out] out_conn 输出连接数
-     * 
+     *
      * @note 所有输出参数必须在设备端可访问
      */
-    __device__ void getState(double& act, int& cycles, double& vulnerability, double& utility, 
-                            int& in_conn, int& out_conn) const {
+    __device__ void getState(double &act, int &cycles, double &vulnerability, double &utility,
+                             int &in_conn, int &out_conn) const {
         act = activity;
         cycles = cycle_counter;
         vulnerability = core_vulnerability;
@@ -453,19 +446,19 @@ public:
         in_conn = input_conn_count;
         out_conn = output_conn_count;
     }
-    
+
     // 设置队列指针的方法
-    void setQueuePointer(DeviceQueue<Message, 32>* queue_ptr) {
+    void setQueuePointer(DeviceQueue<Message, 32> *queue_ptr) {
         queue = queue_ptr;
     }
-    
+
     // 设置邻居队列指针的方法
-    void setNeighbourQueuePointers(DeviceQueue<Message, 32>* queues[6]) {
+    void setNeighbourQueuePointers(DeviceQueue<Message, 32> *queues[6]) {
         for (int i = 0; i < 6; i++) {
             neighbour_queues[i] = queues[i];
         }
     }
-    
+
     // 重置指针为nullptr（用于序列化）
     void resetPointersForSerialization() {
         queue = nullptr;
@@ -476,24 +469,24 @@ public:
         kfe_query_queue = nullptr;
         kfe_result_queue = nullptr;
     }
-    
+
     // 获取邻居队列指针（用于验证）
-    DeviceQueue<Message, 32>* getNeighbourQueue(int index) const {
+    DeviceQueue<Message, 32> *getNeighbourQueue(int index) const {
         if (index >= 0 && index < 6) {
             return neighbour_queues[index];
         }
         return nullptr;
     }
-    
+
     // 获取主队列指针（用于验证）
-    DeviceQueue<Message, 32>* getQueue() const {
+    DeviceQueue<Message, 32> *getQueue() const {
         return queue;
     }
 
     __device__ void adjust_weights_rl(double delta) {
         // 更新核心权重矩阵
-        for(int i=0; i<256; i++) {
-            for(int j=0; j<256; j++) {
+        for (int i = 0; i < 256; i++) {
+            for (int j = 0; j < 256; j++) {
                 W_predict[i][j] += delta * P_Matrix[i][j];
                 // 裁剪防止爆炸
                 W_predict[i][j] = fmax(-2.0, fmin(2.0, W_predict[i][j]));
@@ -501,17 +494,50 @@ public:
         }
     }
 
+    __device__ void apply_trace_update(double global_score, double learning_rate, double trace) {
+        // 1. 计算局部梯度
+        double local_gradient = trace * global_score * activity;
+
+        // 2. 梯度裁剪
+        local_gradient = fmax(-1.0, fmin(1.0, local_gradient));
+
+        // 3. 自适应学习率
+        double adaptive_lr = learning_rate / (1.0 + cycle_counter * 0.0001);
+
+        // 4. 更新权重
+        for (int i = 0; i < 256; i++) {
+            for (int j = 0; j < 256; j++) {
+                W_predict[i][j] += adaptive_lr * local_gradient * P_Matrix[i][j];
+
+                // 权重裁剪
+                W_predict[i][j] = fmax(-2.0, fmin(2.0, W_predict[i][j]));
+            }
+        }
+
+        // 5. Trace衰减
+        trace *= 0.95;
+    }
+
+    ull getcs() { return cycle_counter; }
+
+    void enable_training() { training = true; }
+    void disable_training() { training = false; }
+
+    void set_size(ull size) { GRID_SIZE = size; }
+
 private:
     // ===== 随机数和基础状态 =====
     __managed__ curandStatePhilox4_32_10_t rand_state{};
     __managed__ double activity;
     __managed__ ll local_coord[3]{0, 0, 0};
+    __managed__ bool training;
+    __managed__ ull GRID_SIZE;
     // KFE外部存储队列（通过消息队列与主机通信）
-    __managed__ DeviceQueue<KFE_STM_Slot, 32>* kfe_storage_queue;  // 存储请求队列
-    __managed__ DeviceQueue<std::string, 32>* kfe_query_queue;     // 查询请求队列
-    __managed__ DeviceQueue<KFE_STM_Slot, 32>* kfe_result_queue;   // 查询结果队列
+    __managed__ DeviceQueue<KFE_STM_Slot, 32> *kfe_storage_queue; // 存储请求队列
+    __managed__ DeviceQueue<std::string, 32> *kfe_query_queue; // 查询请求队列
+    __managed__ DeviceQueue<KFE_STM_Slot, 32> *kfe_result_queue; // 查询结果队列
     __managed__ std::vector<ExtKFE_Slot> ext_kfe_slots;
-    __managed__ GPUMutex ext_kfe_mutex,kfe_mutex;
+    __managed__ GPUMutex ext_kfe_mutex, kfe_mutex;
 
     // ===== KFE Short-Term Memory =====
     // Local KFE (Knowledge Feature Encoding) short-term memory slots
@@ -558,6 +584,9 @@ private:
     __managed__ double M_KFE[256][256]{}; // KFE知识上下文
     __managed__ double Deviation[256][256]{}; // 预测误差
     __managed__ double PS_aggregate[256][256]{}; // 邻居共识
+    __managed__ double h_state[256];
+    __managed__ double time_decay[256]; // 每个通道的衰减率
+    __managed__ double time_first[256]; // 时间优先度
 
     // ===== Gating and DRC History =====
     // Variables for controlling inference execution and maintaining history
@@ -569,7 +598,7 @@ private:
     __managed__ int cycle_counter;
     __managed__ double core_vulnerability;
     __managed__ double STM_aggregate_utility;
-    __managed__ double P_history[5][256][256]{}; // 最近5轮历史
+    __managed__ half P_history[5][256][256]{}; // 最近5轮历史
     __managed__ int history_index;
     __managed__ MessageEncoder encoder{};
     __managed__ MessageDecoder decoder{};
@@ -672,7 +701,7 @@ private:
     // ===== 初始化函数 =====
     /**
      * @brief 初始化神经元的矩阵状态
-     * 
+     *
      * @details
      * 初始化以下矩阵：
      * - P_Matrix: 意图矩阵（小随机值）
@@ -683,7 +712,7 @@ private:
      * - PS_aggregate: 邻居共识矩阵
      * - 端口变换矩阵：初始为单位阵变体
      * - DRC历史矩阵
-     * 
+     *
      * @note 使用随机数生成器初始化，确保数值在合理范围内
      */
     __device__ void initializeMatrices() {
@@ -718,7 +747,7 @@ private:
         for (int h = 0; h < 5; h++) {
             for (int i = 0; i < 256; i++) {
                 for (int j = 0; j < 256; j++) {
-                    P_history[h][i][j] = 0.0;
+                    P_history[h][i][j] = 0;
                 }
             }
         }
@@ -727,17 +756,17 @@ private:
     // ===== 卷积操作 =====
     /**
      * @brief 执行8×8卷积操作（stride=8，非重叠）
-     * 
+     *
      * @param[in] input 256×256输入矩阵
      * @param[in] kernel 8×8卷积核
      * @param[out] output 32×32输出特征图
-     * 
+     *
      * @details
      * 将256×256输入通过8×8卷积核下采样到32×32特征图：
      * - 步长为8，无重叠
      * - 应用ReLU激活函数
      * - 添加偏置项
-     * 
+     *
      * @note 确保输入和卷积核内存对齐以优化性能
      */
     __device__ void conv2d_8x8(const double input[256][256],
@@ -765,17 +794,17 @@ private:
 
     /**
      * @brief 执行反卷积操作（上采样）
-     * 
+     *
      * @param[in] input 32×32输入特征图
      * @param[in] kernel 8×8卷积核
      * @param[out] output 256×256输出矩阵
-     * 
+     *
      * @details
      * 将32×32特征图上采样到256×256输出：
      * - 使用转置卷积操作
      * - 输出尺寸为输入尺寸的8倍
      * - 初始化输出矩阵为0
-     * 
+     *
      * @note 反卷积是卷积的逆操作，用于特征重构
      */
     __device__ void deconv2d_8x8(const double input[32][32],
@@ -802,16 +831,16 @@ private:
 
     /**
      * @brief 使用多核卷积提取输入特征
-     * 
+     *
      * @param[in] port 端口索引（0-3）
      * @param[in] input 256×256输入矩阵
-     * 
+     *
      * @details
      * 使用8个不同的卷积核提取输入的多尺度特征：
      * - 每个卷积核提取不同类型的特征
      * - 结果存储在conv_feature_maps中
      * - 支持特征的多层次表示
-     * 
+     *
      * @note 特征提取是推理计算的前置步骤
      */
     __device__ void extractConvFeatures(int port, const double input[256][256]) {
@@ -883,15 +912,15 @@ private:
     // ===== Message Processing =====
     /**
      * @brief Process received messages.
-     * 
+     *
      * @param[in] msg Message to be processed
-     * 
+     *
      * @details
      * Performs different operations based on message type:
      * - NEURON_DATA: Route or receive data messages
      * - FIND_NEURON: Forward or reply to connection requests
      * - REPLY_NEURON_FIND: Process connection replies
-     * 
+     *
      * @note Message processing is the core communication functionality of neurons
      * Handles all inter-neuron communication and network topology discovery.
      */
@@ -969,15 +998,15 @@ private:
 
     /**
      * @brief 3D空间中的消息路由算法
-     * 
+     *
      * @param[in] msg 待路由的消息
-     * 
+     *
      * @details
      * 基于3D坐标的贪婪路由策略：
      * - 比较目标坐标和本地坐标
      * - 选择最接近目标的方向
      * - 支持±X, ±Y, ±Z六个方向
-     * 
+     *
      * @note 路由算法确保消息在3D网络中高效传输
      */
     __device__ void route(Message msg) {
@@ -1032,19 +1061,43 @@ private:
         }
     }
 
+    __device__ void addPositionalEncoding() {
+        // pos = 神经元在3D空间的"序列位置"
+        ll pos = local_coord[0] * GRID_SIZE * GRID_SIZE +
+                 local_coord[1] * GRID_SIZE +
+                 local_coord[2];
+
+        for (int i = 0; i < 256; i++) {
+            for (int j = 0; j < 256; j++) {
+                int d = i * 256 + j; // 维度索引
+
+                // Sinusoidal位置编码
+                double freq = 1.0 / pow(10000.0, 2.0 * d / 65536.0);
+
+                if (d % 2 == 0) {
+                    // 偶数维度用sin
+                    P_Matrix[i][j] += 0.1 * sin(pos * freq);
+                } else {
+                    // 奇数维度用cos
+                    P_Matrix[i][j] += 0.1 * cos(pos * freq);
+                }
+            }
+        }
+    }
+
     // ===== Core Inference Update =====
     /**
      * @brief Execute core inference update computation.
-     * 
+     *
      * @param[in] port Input port index
-     * 
+     *
      * @details
      * Executes the complete inference computation flow:
      * 1. Aggregate neighbor inputs from all ports
      * 2. Compute prediction error and KFE attention
      * 3. Gating decision to execute GEMM or micro-correction
      * 4. Broadcast output and update convolution kernels
-     * 
+     *
      * @note This is the core computational function of neurons
      * Integrates inputs, performs reasoning, and generates outputs.
      */
@@ -1077,6 +1130,16 @@ private:
                 // 提取卷积特征
                 extractConvFeatures(p, transformed_input);
 
+                double score = 0.0;
+                for (int i = 0; i < 256; i++) {
+                    for (int j = 0; j < 256; j++) {
+                        // Q = P_Matrix (当前状态)
+                        // K = all_inputs[k] (输入)
+                        score += P_Matrix[i][j] * transformed_input[i][j];
+                    }
+                }
+                score /= sqrt(256.0 * 256.0);
+
                 // 聚合特征图
                 double aggregated[256][256];
                 aggregateFeatures(p, aggregated);
@@ -1085,8 +1148,20 @@ private:
                 weight_sum += w;
 
                 for (int i = 0; i < 256; i++) {
+                    double wkv = 0.0;
+                    double state = h_state[i]; // 复用SSM的状态
                     for (int j = 0; j < 256; j++) {
-                        PS_aggregate[i][j] += transformed_input[i][j] * w * aggregated[i][j];
+                        double k = PS_aggregate[i][j]; // key
+                        double v = PS_aggregate[i][j]; // value
+
+                        // 时间衰减
+                        double w = -exp(time_decay[i]);
+
+                        // WKV计算
+                        wkv += exp(time_first[i] + k) * v;
+                        state = state * exp(w) + exp(k) * v;
+                        PS_aggregate[i][j] += transformed_input[i][j] * w * aggregated[i][j] * score + wkv / (
+                            wkv + state);
                     }
                 }
             }
@@ -1107,6 +1182,8 @@ private:
                 Deviation[i][j] = PS_aggregate[i][j] - P_stable[i][j];
             }
         }
+
+        selectiveSSM();
 
         // === 阶段2: KFE注意力计算 ===
         STM_aggregate_utility = computeKFEAttention();
@@ -1157,19 +1234,19 @@ private:
 
     /**
      * @brief Compute attention weights for KFE short-term memory.
-     * 
+     *
      * @return double STM aggregate utility value
-     * 
+     *
      * @details
      * Computes correlation between current prediction error and KFE memory fragments:
      * - Iterates through 16 local KFE slots
      * - Computes dot product and applies Sigmoid activation function
      * - Updates KFE statistics for adaptive learning
      * - Supports external KFE queries when local memory is insufficient
-     * 
+     *
      * @note Attention mechanism determines influence of knowledge fragments on current reasoning
      * KFE (Knowledge Feature Encoding) provides contextual knowledge for enhanced inference.
-     * 
+     *
      * The function performs the following operations:
      * 1. Calculates attention weights for each local KFE slot
      * 2. Updates utility, importance, and volatility metrics
@@ -1222,12 +1299,12 @@ private:
 
         if ((usum < 4 && isum < 6) || vsum > 12) {
             double curr_conv16[16][16] = {};
-            ConvResidualProcessor::conv2d_16x16(W_predict,ConvKernel16(),curr_conv16);
+            ConvResidualProcessor::conv2d_16x16(W_predict, ConvKernel16(), curr_conv16);
             double max_sim = 0.0;
             ull max_index = 0;
             for (int k = 0; k < ext_kfe_slots.size(); k++) {
                 auto &i = ext_kfe_slots[k];
-                double sim = cosineSimilarity16x16(i.conv16,curr_conv16);
+                double sim = cosineSimilarity16x16(i.conv16, curr_conv16);
                 if (sim > max_sim) {
                     max_sim = sim;
                     max_index = k;
@@ -1268,21 +1345,209 @@ private:
         return utility / 16.0;
     }
 
+    double gelu(double x) {
+        return 0.5 * x * (1.0 + tanh(0.797885 * (x + 0.044715 * x * x * x)));
+    }
+
+    __device__ void selectiveSSM() {
+        // 1. 输入投影
+        double B[256], C[256]; // 输入门和输出门
+
+        for (int i = 0; i < 256; i++) {
+            // 根据输入决定如何更新状态
+            double input_i = 0.0;
+            for (int j = 0; j < 256; j++) {
+                input_i += PS_aggregate[i][j];
+            }
+            input_i /= 256.0;
+
+            // 选择性门控 (类似LSTM的forget gate)
+            B[i] = gelu(input_i); // 记忆多少输入
+            C[i] = gelu(-input_i); // 输出多少状态
+        }
+
+        // 2. 状态更新 (线性递归)
+        for (int i = 0; i < 256; i++) {
+            // Δ = B × input + decay × h_old
+            double delta = B[i] * PS_aggregate[i][0];
+            h_state[i] = 0.9 * h_state[i] + delta;
+        }
+
+        // 3. 输出投影
+        for (int i = 0; i < 256; i++) {
+            for (int j = 0; j < 256; j++) {
+                P_Matrix[i][j] += C[i] * h_state[i];
+            }
+        }
+    }
+
+    __device__ bool shouldUseFullAttention() {
+        // 重要任务用Transformer的完整注意力
+        // 一般任务用RWKV的线性注意力
+        return (core_vulnerability > 0.7) ||
+               (STM_aggregate_utility > 0.6);
+    }
+
+    void predictNoise(double input[256][256], double output[256][256]) {
+        // 多尺度特征提取层
+        double scale1[256][256]; // 细节特征
+        double scale2[256][256]; // 中等尺度特征
+        double scale3[256][256]; // 粗糙特征
+
+        // 第一层：提取边缘和细节特征 (3x3卷积)
+        for (int i = 1; i < 255; i++) {
+            for (int j = 1; j < 255; j++) {
+                // Sobel边缘检测核
+                double gx = -input[i - 1][j - 1] - 2 * input[i][j - 1] - input[i + 1][j - 1] +
+                            input[i - 1][j + 1] + 2 * input[i][j + 1] + input[i + 1][j + 1];
+                double gy = -input[i - 1][j - 1] - 2 * input[i - 1][j] - input[i - 1][j + 1] +
+                            input[i + 1][j - 1] + 2 * input[i + 1][j] + input[i + 1][j + 1];
+                scale1[i][j] = sqrt(gx * gx + gy * gy) * 0.1; // 缩放因子
+            }
+        }
+
+        // 第二层：提取中等尺度特征 (5x5高斯平滑)
+        for (int i = 2; i < 254; i++) {
+            for (int j = 2; j < 254; j++) {
+                double sum = 0.0;
+                // 5x5高斯核近似
+                sum += 1 * input[i - 2][j - 2] + 4 * input[i - 2][j - 1] + 6 * input[i - 2][j] + 4 * input[i - 2][j + 1]
+                        + 1 * input[i - 2][j + 2];
+                sum += 4 * input[i - 1][j - 2] + 16 * input[i - 1][j - 1] + 24 * input[i - 1][j] + 16 * input[i - 1][
+                    j + 1] + 4 * input[i - 1][j + 2];
+                sum += 6 * input[i][j - 2] + 24 * input[i][j - 1] + 36 * input[i][j] + 24 * input[i][j + 1] + 6 * input[
+                    i][j + 2];
+                sum += 4 * input[i + 1][j - 2] + 16 * input[i + 1][j - 1] + 24 * input[i + 1][j] + 16 * input[i + 1][
+                    j + 1] + 4 * input[i + 1][j + 2];
+                sum += 1 * input[i + 2][j - 2] + 4 * input[i + 2][j - 1] + 6 * input[i + 2][j] + 4 * input[i + 2][j + 1]
+                        + 1 * input[i + 2][j + 2];
+                scale2[i][j] = sum / 256.0; // 归一化
+            }
+        }
+
+        // 第三层：提取粗糙特征 (9x9平均池化)
+        for (int i = 4; i < 252; i++) {
+            for (int j = 4; j < 252; j++) {
+                double sum = 0.0;
+                for (int di = -4; di <= 4; di++) {
+                    for (int dj = -4; dj <= 4; dj++) {
+                        sum += input[i + di][j + dj];
+                    }
+                }
+                scale3[i][j] = sum / 81.0; // 9x9=81
+            }
+        }
+
+        // 边界填充
+        for (int i = 0; i < 256; i++) {
+            for (int j = 0; j < 256; j++) {
+                if (i < 1 || i >= 255 || j < 1 || j >= 255) {
+                    scale1[i][j] = 0.0;
+                }
+                if (i < 2 || i >= 254 || j < 2 || j >= 254) {
+                    scale2[i][j] = input[i][j];
+                }
+                if (i < 4 || i >= 252 || j < 4 || j >= 252) {
+                    scale3[i][j] = input[i][j];
+                }
+            }
+        }
+
+        // 特征融合层
+        for (int i = 4; i < 252; i++) {
+            for (int j = 4; j < 252; j++) {
+                // 加权融合多尺度特征
+                double fused = 0.4 * scale1[i][j] + 0.3 * scale2[i][j] + 0.3 * scale3[i][j];
+
+                // 使用Swish激活函数: x * sigmoid(x)
+                double sigmoid_val = 1.0 / (1.0 + exp(-fused));
+                output[i][j] = fused * sigmoid_val;
+            }
+        }
+
+        // 注意力机制：突出重要的噪声区域
+        double attention_map[256][256];
+        double mean_val = 0.0;
+
+        // 计算平均值
+        for (int i = 4; i < 252; i++) {
+            for (int j = 4; j < 252; j++) {
+                mean_val += fabs(output[i][j]);
+            }
+        }
+        mean_val /= (248 * 248);
+
+        // 生成注意力图
+        for (int i = 4; i < 252; i++) {
+            for (int j = 4; j < 252; j++) {
+                // 对比度增强
+                double diff = fabs(output[i][j]) - mean_val;
+                attention_map[i][j] = 1.0 + tanh(diff * 2.0); // 放大差异
+            }
+        }
+
+        // 应用注意力权重
+        for (int i = 4; i < 252; i++) {
+            for (int j = 4; j < 252; j++) {
+                output[i][j] *= attention_map[i][j];
+            }
+        }
+
+        // 残差连接：保留原始输入信息
+        for (int i = 4; i < 252; i++) {
+            for (int j = 4; j < 252; j++) {
+                output[i][j] += 0.1 * input[i][j]; // 弱连接
+            }
+        }
+
+        // 最终平滑处理
+        double temp[256][256];
+        for (int i = 5; i < 251; i++) {
+            for (int j = 5; j < 251; j++) {
+                // 3x3平均滤波
+                double sum = 0.0;
+                for (int di = -1; di <= 1; di++) {
+                    for (int dj = -1; dj <= 1; dj++) {
+                        sum += output[i + di][j + dj];
+                    }
+                }
+                temp[i][j] = sum / 9.0;
+            }
+        }
+
+        // 复制结果
+        for (int i = 5; i < 251; i++) {
+            for (int j = 5; j < 251; j++) {
+                output[i][j] = temp[i][j];
+            }
+        }
+
+        // 边界处理
+        for (int i = 0; i < 256; i++) {
+            for (int j = 0; j < 5; j++) {
+                output[i][j] = output[i][5];
+                output[i][255 - j] = output[i][250];
+                output[j][i] = output[5][i];
+                output[255 - j][i] = output[250][i];
+            }
+        }
+    }
+
     /**
      * @brief Execute GEMM inference and DRC iterative correction.
-     * 
+     *
      * @details
      * Complete inference computation workflow:
      * 1. GEMM core inference (P_Matrix × W_predict)
      * 2. Compute fixed target T_fixed
      * 3. 16 rounds of DRC iterative correction
      * 4. Synchronize state and update core vulnerability
-     * 
+     *
      * @note This is the most computationally intensive part, using GELU activation and momentum correction
-     * 
+     *
      * GEMM (General Matrix Multiply) performs core neural computations.
      * DRC (Dynamic Recalibration Correction) iteratively refines results for accuracy.
-     * 
+     *
      * The function performs:
      * - Matrix multiplication with learned weights
      * - Knowledge context integration from KFE
@@ -1291,12 +1556,13 @@ private:
      * - Historical momentum for stable learning
      */
     __device__ void executeGEMMAndDRC() {
+        addPositionalEncoding();
         // === 步骤1: GEMM核心推理 ===
         double P_Next[256][256];
         double temp_product[256][256];
 
         double P_Original[256][256];
-        memcpy(&P_Original,&P_Matrix,sizeof(P_Matrix));
+        memcpy(&P_Original, &P_Matrix, sizeof(P_Matrix));
 
         // P_Matrix × W_predict
         matmul_double(&P_Matrix[0][0], &W_predict[0][0], &temp_product[0][0]);
@@ -1328,6 +1594,8 @@ private:
         double epsilon = 1e-4;
         double eta_base = 0.1;
         double lambda = 0.9;
+
+        double prev_diff_norm = 0.0;
 
         for (int iter = 0; iter < 16; iter++) {
             double P_new[256][256];
@@ -1379,12 +1647,49 @@ private:
 
             // 更新历史
             history_index = (history_index + 1) % 5;
-            memcpy(P_history[history_index], P_current, sizeof(P_current));
+            for (int i = 0; i < 256; i++) {
+                for (int j = 0; j < 256; j++) {
+                    P_history[history_index][i][j] = __float2half(P_current[i][j]);
+                }
+            }
             memcpy(P_current, P_new, sizeof(P_current));
 
             // 早停
             if (diff_norm < epsilon) {
                 break;
+            }
+            if (iter > 8 && diff_norm > prev_diff_norm) {
+                // 开始震荡,停止
+                break;
+            }
+            prev_diff_norm = diff_norm;
+        }
+
+        double beta_schedule[16]; // 噪声调度
+
+        // 余弦调度 (类似Improved DDPM)
+        for (int t = 0; t < 16; t++) {
+            double alpha = cos(PI * t / 32.0);
+            beta_schedule[t] = 1.0 - alpha * alpha;
+        }
+
+        // 迭代去噪
+        for (int t = 15; t >= 0; t--) {
+            // 反向扩散
+            double beta = beta_schedule[t];
+
+            // 预测噪声
+            double noise_pred[256][256];
+            predictNoise(P_current, noise_pred);
+
+            // 去噪一步
+            for (int i = 0; i < 256; i++) {
+                for (int j = 0; j < 256; j++) {
+                    P_current[i][j] -= sqrt(beta) * noise_pred[i][j];
+                    P_current[i][j] = (P_current[i][j] -
+                                       sqrt(beta) * noise_pred[i][j]) /
+                                      sqrt(1.0 - beta);
+                }
             }
         }
 
@@ -1394,35 +1699,63 @@ private:
 
         updateCoreVulnerability();
 
-        for(int i=0; i<256; i++) {
-            for(int j=0; j<256; j++) {
+        for (int i = 0; i < 256; i++) {
+            for (int j = 0; j < 256; j++) {
                 P_Matrix[i][j] = 0.9 * P_Matrix[i][j] + 0.1 * P_Original[i][j];
             }
         }
-        layerNorm(&P_Matrix[0][0], 256*256);
+        layerNorm(&P_Matrix[0][0], 256 * 256);
+
+        // 添加Dropout (训练时随机丢弃神经元)
+        if (training) {
+            // 需要添加这个标志
+            double dropout_rate = 0.1; // 10% dropout
+
+            for (int i = 0; i < 256; i++) {
+                for (int j = 0; j < 256; j++) {
+                    if (curand_uniform(&rand_state) < dropout_rate) {
+                        P_Matrix[i][j] = 0.0; // 随机置零
+                    } else {
+                        // 缩放补偿
+                        P_Matrix[i][j] /= (1.0 - dropout_rate);
+                    }
+                }
+            }
+        }
+
+        // 或者使用DropConnect (dropout权重而不是激活)
+        if (training) {
+            for (int i = 0; i < 256; i++) {
+                for (int j = 0; j < 256; j++) {
+                    if (curand_uniform(&rand_state) < 0.1) {
+                        W_predict[i][j] = 0.0; // 临时屏蔽权重
+                    }
+                }
+            }
+        }
     }
 
     /**
      * @brief 执行低成本微修正计算
-     * 
+     *
      * @details
      * 轻量级的推理修正：
      * - 基于当前状态和邻居共识的线性插值
      * - 学习率较低（0.05）
      * - 适用于稳定状态下的微小调整
-     * 
+     *
      * @note 微修正比完整GEMM计算量小，适合频繁执行
      */
     __device__ void executeMicroCorrection() {
         double alpha = 0.3;
-        double eta_micro = 0.05 + max(min(learn,1.0),0.0) * 0.0001;
+        double eta_micro = 0.05 + max(min(learn, 1.0), 0.0) * 0.0001;
 
         for (int i = 0; i < 256; i++) {
             for (int j = 0; j < 256; j++) {
                 double T_micro = alpha * PS_aggregate[i][j] +
                                  (1.0 - alpha) * P_Matrix[i][j];
                 P_Matrix[i][j] += eta_micro * (T_micro - P_Matrix[i][j]);
-                P_Matrix[i][j] += max(min(noise,1.0),0.0) * 0.0001 * (randomInRange(0,1) - 0.5);
+                P_Matrix[i][j] += max(min(noise, 1.0), 0.0) * 0.0001 * (randomInRange(0, 1) - 0.5);
             }
         }
     }
@@ -1664,11 +1997,13 @@ private:
                 for (int j = 0; j < 256; j++) {
                     // 输入变换矩阵更新
                     double delta_in = learning_rate * inp.array[i][j] * P_Matrix[i][j];
-                    input_multiplex_array[i][j][p] += delta_in * (1.0 + max(min(learn,1.0),0.0) * 0.001) + noise * 0.0001 * (randomInRange(0,1) - 0.5);
+                    input_multiplex_array[i][j][p] += delta_in * (1.0 + max(min(learn, 1.0), 0.0) * 0.001) + noise *
+                            0.0001 * (randomInRange(0, 1) - 0.5);
 
                     // 输出变换矩阵更新(对称)
                     double delta_out = learning_rate * P_Matrix[i][j] * inp.array[i][j];
-                    output_multiplex_array[i][j][p] += delta_out * (1.0 + max(min(learn,1.0),0.0) * 0.001) + noise * 0.0001 * (randomInRange(0,1) - 0.5);
+                    output_multiplex_array[i][j][p] += delta_out * (1.0 + max(min(learn, 1.0), 0.0) * 0.001) + noise *
+                            0.0001 * (randomInRange(0, 1) - 0.5);
 
                     // 防止权重爆炸
                     input_multiplex_array[i][j][p] = fmax(-2.0, fmin(2.0, input_multiplex_array[i][j][p]));
@@ -1678,20 +2013,20 @@ private:
         }
     }
 
-    __device__ void layerNorm(double* data, int size) {
+    __device__ void layerNorm(double *data, int size) {
         double mean = 0.0, var = 0.0;
-        for(int i=0; i<size; i++) mean += data[i];
+        for (int i = 0; i < size; i++) mean += data[i];
         mean /= size;
 
-        for(int i=0; i<size; i++) var += (data[i] - mean) * (data[i] - mean);
+        for (int i = 0; i < size; i++) var += (data[i] - mean) * (data[i] - mean);
         var /= size;
 
         double std = sqrt(var + 1e-6);
-        for(int i=0; i<size; i++) {
+        for (int i = 0; i < size; i++) {
             data[i] = (data[i] - mean) / std;
         }
     }
-    
+
     // ===== 单步推理函数 =====
     // 输入: Message (to_coord必须等于local_coord)
     // 输出: Message (包含推理结果)
@@ -1699,7 +2034,7 @@ private:
     __device__ Message stepInference(Message input_msg) {
         // 1. 处理输入消息
         processMessage(input_msg);
-        
+
         // 2. 处理端口输入并执行推理
         bool processed_input = false;
         for (int p = 0; p < 4; p++) {
@@ -1708,7 +2043,7 @@ private:
                 processed_input = true;
             }
         }
-        
+
         // 3. 如果没有输入，也执行一次推理
         if (!processed_input) {
             if (shouldTriggerGEMM()) {
@@ -1717,20 +2052,20 @@ private:
                 executeMicroCorrection();
             }
         }
-        
+
         // 4. 更新活跃度
         updateActivity();
-        
+
         // 5. 准备输出消息
         Message output_msg{};
         memcpy(output_msg.from_coord, local_coord, sizeof(local_coord));
         memcpy(output_msg.to_coord, input_msg.from_coord, sizeof(ll) * 3);
         memcpy(output_msg.last_proxy_coord, local_coord, sizeof(local_coord));
-        
+
         output_msg.activity = activity;
         output_msg.weight = computeImportance();
         output_msg.type = NEURON_DATA;
-        
+
         // 选择压缩模式
         if (computeImportance() > 0.7 && activity > 0.3 && core_vulnerability > 0.3) {
             output_msg.compression_mode = MODE_FULL;
@@ -1745,15 +2080,15 @@ private:
             output_msg.adaptive_msg.conv_msg = ConvMessage{};
             encoder.encodeConv(P_Matrix, output_msg.adaptive_msg.conv_msg);
         }
-        
+
         // 6. 维护任务
         cycle_counter++;
         if (cycle_counter % 10 == 0) kfeDecay();
         if (cycle_counter % 50 == 0) updateMultiplexMatrices();
-        
+
         return output_msg;
     }
-    
+
     // ===== 简化版本：直接处理输入数据 =====
     // 输入: 256x256数据矩阵
     // 输出: Message (包含推理结果)
@@ -1767,21 +2102,21 @@ private:
         input_msg.weight = 1.0;
         input_msg.type = NEURON_DATA;
         input_msg.compression_mode = MODE_FULL;
-        
+
         // 2. 解码输入数据
         NeuronInput temp_input{};
         memcpy(temp_input.array, input_data, sizeof(double) * 256 * 256);
         temp_input.activity = 1.0;
         temp_input.weight = 1.0;
         memcpy(temp_input.from_coord, from_coord, sizeof(ll) * 3);
-        
+
         // 3. 注入到端口0
         port_in[0].push(temp_input);
-        
+
         // 4. 执行推理
         return stepInference(input_msg);
     }
-    
+
     // ===== 最简版本：只执行一次推理 =====
     // 输出: 当前状态矩阵 (256x256)
     __device__ void stepInferenceOnly(double output_data[256][256]) {
@@ -1791,13 +2126,13 @@ private:
         } else {
             executeMicroCorrection();
         }
-        
+
         // 更新活跃度
         updateActivity();
-        
+
         // 复制输出
         memcpy(output_data, P_Matrix, sizeof(double) * 256 * 256);
-        
+
         // 维护任务
         cycle_counter++;
         if (cycle_counter % 10 == 0) kfeDecay();
@@ -1806,54 +2141,59 @@ private:
 };
 
 
-__global__ void all_neurons_kernel(Neuron *neurons, bool* active_flags, ull count) {
+__global__ void all_neurons_kernel(Neuron *neurons, bool *active_flags, ull count) {
     ull tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid < count && active_flags[tid]) {
-        try{
+        try {
             neurons[tid].step();
-        }catch (...) {
+        } catch (...) {
             // 捕获所有异常，防止CUDA崩溃
         }
     }
 }
 
-__global__ void update_activity(Neuron* neurons, bool* active_flags, double* trace, double score, bool training) {
+__global__ void update_activity(Neuron *neurons, bool *active_flags, double *trace, double score, bool training) {
     ull tid = blockIdx.x * blockDim.x + threadIdx.x;
     active_flags[tid] = neurons[tid].is_active();
     if (active_flags[tid] && training) {
-        trace[tid] += neurons[tid].get_activity() * 0.1 * max(min(score,1.0),0.0);
+        trace[tid] += neurons[tid].get_activity() * 0.1 * max(min(score, 1.0), 0.0);
     } else {
         trace[tid] -= 0.01;
     }
 }
 
-__global__ void reset_trace(double* trace) {
+__global__ void reset_trace(double *trace) {
     ull tid = blockIdx.x * blockDim.x + threadIdx.x;
     trace[tid] = 0;
 }
 
 __global__ void apply_trace_to_neurons(
-    Neuron* neurons,
-    double* trace,
+    Neuron *neurons,
+    double *trace,
     double global_score,
     ull count
 ) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= count) return;
 
-    // 只更新有贡献的神经元
     if (trace[tid] > 0.01) {
-        // 获取当前神经元的活跃度
         double activity = neurons[tid].get_activity();
 
-        // 计算权重更新量
-        // Policy Gradient: ∇J = E[(R - b) × ∇log π]
-        double advantage = global_score - 0.5;
-        double gradient = trace[tid] * advantage;
-        double delta_w = 0.01 * trace[tid] * global_score * activity * gradient;
+        // Policy Gradient: ∇J = trace × (R - baseline)
+        double baseline = 0.5; // 可以用移动平均
+        double advantage = global_score - baseline;
 
-        // 调用神经元的权重更新函数
-        neurons[tid].adjust_weights_rl(delta_w);
+        // 最终梯度
+        double gradient = trace[tid] * advantage * activity;
+
+        // 自适应学习率
+        double learning_rate = 0.001 / (1.0 + neurons[tid].getcs() * 0.0001);
+
+        // 更新权重
+        neurons[tid].adjust_weights_rl(gradient * learning_rate);
+
+        // Trace衰减
+        trace[tid] *= 0.95;
     }
 }
 #endif //SRC_NEURON_H

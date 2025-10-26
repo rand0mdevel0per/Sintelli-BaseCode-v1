@@ -1,18 +1,421 @@
 //
+
 // Created by ASUS on 10/8/2025.
+
 //
+
 
 #include <iostream>
 
+
 #include "openai_client.h"
+
+
 #include <vector>
+
+
 #include <thread>
+
+
 #include "NeuronModel.cu"
+
+
 #include <string>
+
+
 #include <utility>
+
+
 #include <algorithm>
 
+
+#include <Python.h>
+
+
+#include <curl/curl.h>
+
+
 using namespace std;
+
+
+// CURL全局初始化
+
+static bool curl_initialized = false;
+
+static void init_curl() {
+    if (!curl_initialized) {
+        curl_global_init(CURL_GLOBAL_DEFAULT);
+
+        curl_initialized = true;
+    }
+}
+
+
+std::string runPythonCode(const std::string &code) {
+    // 初始化Python（如果还没初始化）
+    static bool python_initialized = false;
+    if (!python_initialized) {
+        Py_Initialize();
+        python_initialized = true;
+    }
+
+    // 初始化CURL
+    init_curl();
+
+    if (!Py_IsInitialized()) {
+        return "Failed to initialize Python";
+    }
+
+    // 捕获stdout
+    PyRun_SimpleString(
+        "import sys\n"
+        "from io import StringIO\n"
+        "old_stdout = sys.stdout\n"
+        "sys.stdout = mystdout = StringIO()\n"
+    );
+
+    // 执行代码
+    int result = PyRun_SimpleString(code.c_str());
+
+    // 获取输出
+    PyRun_SimpleString(
+        "sys.stdout = old_stdout\n"
+        "output = mystdout.getvalue()\n"
+    );
+
+    if (result != 0) {
+        PyErr_Print();
+        return "Error executing Python code";
+    }
+
+    // 获取输出字符串
+    PyObject *main_module = PyImport_AddModule("__main__");
+    PyObject *main_dict = PyModule_GetDict(main_module);
+    PyObject *output_obj = PyDict_GetItemString(main_dict, "output");
+
+    std::string output = "";
+    if (output_obj && PyUnicode_Check(output_obj)) {
+        const char *output_str = PyUnicode_AsUTF8(output_obj);
+        if (output_str) {
+            output = std::string(output_str);
+        }
+    }
+
+    return output;
+}
+
+// 数学计算函数，使用sympy进行符号计算
+std::string calculateMathExpression(const std::string &expression) {
+    // 确保安装了sympy
+    std::string install_code = "("
+            "import subprocess\n"
+            "import sys\n"
+            "try:\n"
+            "    import sympy\n"
+            "    print(\"Sympy already installed\")\n"
+            "except ImportError:\n"
+            "    print(\"Installing sympy...\")\n"
+            "    subprocess.check_call([sys.executable, \"-m\", \"pip\", \"install\", \"sympy\"])\n"
+            "    print(\"Sympy installed successfully\")\n"
+            ")\n";
+
+    // 执行安装代码（即使已经安装了，pip也会自动跳过）
+    std::string install_result = runPythonCode(install_code);
+
+    // 数学计算代码
+    std::string math_code = R"("
+            "import sys\n"
+            "import math\n"
+            "import sympy as sp\n"
+            "from sympy import symbols, simplify, diff, integrate, solve, latex\n"
+            "from sympy.parsing.latex import parse_latex\n"
+            "from sympy.parsing.sympy_parser import parse_expr\n"
+            "\n"
+            "try:\n"
+            "    expr_str = ')\" + expression + R\"('\n"
+            "    \n"
+            "    # 尝试解析LaTeX格式\n"
+            "    if '\\' in expr_str or '{' in expr_str:\n"
+            "        try:\n"
+            "            expr = parse_latex(expr_str)\n"
+            "        except:\n"
+            "            expr = parse_expr(expr_str)\n"
+            "    else:\n"
+            "        # 尝试解析普通表达式\n"
+            "        try:\n"
+            "            expr = parse_expr(expr_str)\n"
+            "        except:\n"
+            "            # 如果解析失败，尝试直接计算\n"
+            "            allowed_names = {\n"
+            "                k: v for k, v in math.__dict__.items() if not k.startswith(\"__\")\n"
+            "            }\n"
+            "            allowed_names.update({\n"
+            "                \"abs\": abs, \"round\": round, \"pow\": pow, \"max\": max, \"min\": min,\n"
+            "                \"sqrt\": math.sqrt, \"sin\": math.sin, \"cos\": math.cos, \"tan\": math.tan,\n"
+            "                \"log\": math.log, \"exp\": math.exp, \"pi\": math.pi, \"e\": math.e,\n"
+            "                \"asin\": math.asin, \"acos\": math.acos, \"atan\": math.atan,\n"
+            "                \"sinh\": math.sinh, \"cosh\": math.cosh, \"tanh\": math.tanh,\n"
+            "                \"ceil\": math.ceil, \"floor\": math.floor\n"
+            "            })\n"
+            "            result = eval(expr_str, {\"__builtins__\": {}}, allowed_names)\n"
+            "            print(\"Result:\", result)\n"
+            "            sys.exit(0)\n"
+            "    \n"
+            "    # 如果是纯数值表达式，直接计算\n"
+            "    if expr.is_number:\n"
+            "        result = expr.evalf()\n"
+            "        print(\"Result:\", float(result))\n"
+            "    else:\n"
+            "        # 尝试简化表达式\n"
+            "        simplified = sp.simplify(expr)\n"
+            "        if simplified.is_number:\n"
+            "            result = simplified.evalf()\n"
+            "            print(\"Result:\", float(result))\n"
+            "        else:\n"
+            "            # 返回简化后的表达式\n"
+            "            print(\"Simplified expression:\", str(simplified))\n"
+            "            # 如果可能，计算数值结果\n"
+            "            try:\n"
+            "                numeric_result = simplified.evalf()\n"
+            "                print(\"Numeric result:\", float(numeric_result))\n"
+            "            except:\n"
+            "                pass\n"
+            "                \n"
+            "except Exception as e:\n"
+            "    print(\"Error:\", str(e))\n"
+            "    # 回退到基本计算\n"
+            "    try:\n"
+            "        import math\n"
+            "        allowed_names = {\n"
+            "            k: v for k, v in math.__dict__.items() if not k.startswith(\"__\")\n"
+            "        }\n"
+            "        allowed_names.update({\n"
+            "            \"abs\": abs, \"round\": round, \"pow\": pow, \"max\": max, \"min\": min,\n"
+            "            \"sqrt\": math.sqrt, \"sin\": math.sin, \"cos\": math.cos, \"tan\": math.tan,\n"
+            "            \"log\": math.log, \"exp\": math.exp, \"pi\": math.pi, \"e\": math.e\n"
+            "        })\n"
+            "        result = eval(')\" + expression + R\"(', {\"__builtins__\": {}}, allowed_names)\n"
+            "        print(\"Result:\", result)\n"
+            "    except Exception as e2:\n"
+            "        print(\"Error in fallback calculation:\", str(e2))\n"
+            ")\n";
+
+    // 执行数学计算代码
+    std::string result = runPythonCode(math_code);
+    return result;
+}
+
+/*
+// CURL写回调函数
+static size_t WriteCallback(void *contents, size_t size, size_t nmemb, std::string *response) {
+    size_t realsize = size * nmemb;
+    response->append((char*)contents, realsize);
+    return realsize;
+}
+*/
+
+// 执行Bing搜索
+std::string performBingSearch(const std::string &query, const std::string &apiKey) {
+    // 初始化CURL
+    init_curl();
+
+    CURL *curl;
+    CURLcode res;
+    std::string readBuffer;
+
+    curl = curl_easy_init();
+    if (curl) {
+        std::string url = "https://api.bing.microsoft.com/v7.0/search?q=" + query;
+
+        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
+
+        // 设置请求头
+        struct curl_slist *headers = NULL;
+        std::string auth_header = "Ocp-Apim-Subscription-Key: " + apiKey;
+        headers = curl_slist_append(headers, auth_header.c_str());
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+
+        // 执行请求
+        res = curl_easy_perform(curl);
+
+        // 清理
+        curl_slist_free_all(headers);
+        curl_easy_cleanup(curl);
+    }
+
+    return readBuffer;
+}
+
+// 执行Google搜索（通过自定义搜索引擎）
+std::string performGoogleSearch(const std::string &query, const std::string &apiKey, const std::string &engineId) {
+    // 初始化CURL
+    init_curl();
+
+    CURL *curl;
+    CURLcode res;
+    std::string readBuffer;
+
+    curl = curl_easy_init();
+    if (curl) {
+        std::string url = "https://www.googleapis.com/customsearch/v1?key=" + apiKey + "&cx=" + engineId + "&q=" +
+                          query;
+
+        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
+
+        // 执行请求
+        res = curl_easy_perform(curl);
+
+        // 清理
+        curl_easy_cleanup(curl);
+    }
+
+    return readBuffer;
+}
+
+// 执行ArXiv搜索
+std::string performArxivSearch(const std::string &query) {
+    // 初始化CURL
+    init_curl();
+
+    CURL *curl;
+    CURLcode res;
+    std::string readBuffer;
+
+    curl = curl_easy_init();
+    if (curl) {
+        std::string url = "http://export.arxiv.org/api/query?search_query=" + query + "&start=0&max_results=10";
+
+        curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
+
+        // 执行请求
+        res = curl_easy_perform(curl);
+
+        // 清理
+        curl_easy_cleanup(curl);
+    }
+
+    return readBuffer;
+}
+
+// 综合搜索函数
+std::string performSearch(const std::string &query) {
+    // 这里需要实际的API密钥，暂时使用占位符
+    const std::string BING_API_KEY = "YOUR_BING_API_KEY";
+    const std::string GOOGLE_API_KEY = "YOUR_GOOGLE_API_KEY";
+    const std::string GOOGLE_ENGINE_ID = "YOUR_GOOGLE_ENGINE_ID";
+
+    std::string result = "";
+
+    // 先尝试学术搜索（ArXiv）
+    try {
+        std::string arxiv_result = performArxivSearch(query);
+        if (!arxiv_result.empty()) {
+            result += "ArXiv搜索结果:\n" + arxiv_result + "\n\n";
+        }
+    } catch (...) {
+        result += "ArXiv搜索失败\n\n";
+    }
+
+    // 然后尝试Bing搜索
+    try {
+        std::string bing_result = performBingSearch(query, BING_API_KEY);
+        if (!bing_result.empty()) {
+            result += "Bing搜索结果:\n" + bing_result + "\n\n";
+        }
+    } catch (...) {
+        result += "Bing搜索失败\n\n";
+    }
+
+    // 最后尝试Google搜索
+    try {
+        std::string google_result = performGoogleSearch(query, GOOGLE_API_KEY, GOOGLE_ENGINE_ID);
+        if (!google_result.empty()) {
+            result += "Google搜索结果:\n" + google_result + "\n\n";
+        }
+    } catch (...) {
+        result += "Google搜索失败\n\n";
+    }
+
+    return result.empty() ? "搜索失败，未获取到结果" : result;
+}
+
+// 无需API key!
+std::string performDuckDuckGoSearch(const std::string &query) {
+    CURL *curl = curl_easy_init();
+    std::string url = "https://api.duckduckgo.com/?q=" +
+                      query + "&format=json";
+
+    std::string readBuffer;
+
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
+
+    // 执行请求
+    auto res = curl_easy_perform(curl);
+
+    return readBuffer;
+}
+
+// 综合搜索函数
+std::string performSearch(const std::string &query, std::string bing, std::string google, std::string google_eng) {
+    // 这里需要实际的API密钥，暂时使用占位符
+    const std::string BING_API_KEY = bing;
+    const std::string GOOGLE_API_KEY = google;
+    const std::string GOOGLE_ENGINE_ID = google_eng;
+
+    std::string result = "";
+
+    // 先尝试学术搜索（ArXiv）
+    try {
+        std::string arxiv_result = performArxivSearch(query);
+        if (!arxiv_result.empty()) {
+            result += "ArXiv搜索结果:\n" + arxiv_result + "\n\n";
+        }
+    } catch (...) {
+        result += "ArXiv搜索失败\n\n";
+    }
+
+    // 然后尝试Bing搜索
+    if (!bing.empty()) {
+        try {
+            std::string bing_result = performBingSearch(query, BING_API_KEY);
+            if (!bing_result.empty()) {
+                result += "Bing搜索结果:\n" + bing_result + "\n\n";
+            }
+        } catch (...) {
+            result += "Bing搜索失败\n\n";
+        }
+    }
+
+    try {
+        std::string ddg_result = performDuckDuckGoSearch(query);
+        if (!ddg_result.empty()) {
+            result += "DuckDuckGo搜索结果:\n" + ddg_result + "\n\n";
+        }
+    } catch (...) {
+    }
+
+    // 最后尝试Google搜索
+    if (!google.empty()) {
+        try {
+            std::string google_result = performGoogleSearch(query, GOOGLE_API_KEY, GOOGLE_ENGINE_ID);
+            if (!google_result.empty()) {
+                result += "Google搜索结果:\n" + google_result + "\n\n";
+            }
+        } catch (...) {
+            result += "Google搜索失败\n\n";
+        }
+    }
+
+    return result.empty() ? "搜索失败，未获取到结果" : result;
+}
 
 bool run = true;
 
@@ -105,7 +508,8 @@ std::string streamPerformingOpenAIAPI(OpenAIClient::HttpClient &client, OpenAICl
     return response;
 }
 
-void run_training(NeuronModel *model, const std::string &api_key, const std::string &name = "Sydney") {
+void run_training(NeuronModel *model, const std::string &api_key, const std::string &name = "Sydney",
+                  std::string bing_api_key, std::string google_api_key, std::string google_engine_id) {
     std::vector<OpenAIClient::ChatMessage> msgs;
 
     // 创建系统消息，支持多模态输入
@@ -157,8 +561,6 @@ void run_training(NeuronModel *model, const std::string &api_key, const std::str
             "• Python Environment (pytools) - Code execution, data analysis, simulations\n"
             "• Search Engine (stools) - Web search across Baidu, Bing, and academic sources\n"
             "• Knowledge Database (kbtools) - Access to structured knowledge bases\n"
-            "• Code Analysis (catools) - Code review, debugging, optimization suggestions\n"
-            "• Creative Assistant (crtools) - Content generation, writing assistance\n"
             "• Image Generator (imgg) - Generate image through the prompt given\n"
             "\n"
             "MODEL DEVELOPMENT ROADMAP:\n"
@@ -229,6 +631,11 @@ void run_training(NeuronModel *model, const std::string &api_key, const std::str
 
     std::string input;
 
+    std::unique_ptr<FeatureExtractor> feature_extractor;
+    std::unique_ptr<LogicInjector> logic_injector;
+    RAGKnowledgeBaseLoader rag_loader;
+    ExternalStorage<Logic> logic_tree{};
+
     // 创建请求对象
     OpenAIClient::ChatCompletionRequest req;
     req.model = "google/gemini-2.5-flash-preview-09-2025";
@@ -282,59 +689,157 @@ void run_training(NeuronModel *model, const std::string &api_key, const std::str
             std::transform(lower_input.begin(), lower_input.end(), lower_input.begin(), ::tolower);
             if (lower_input.find("<tool_begin>") != std::string::npos) {
                 auto tool_calls = parseToolCall(response);
-                switch (tool_calls.first) {
-                    case "acs45":
-                        auto rmsg = OpenAIClient::ChatCompletionRequest{
-                            "anthropic/claude-sonnet-4.5", {{"user", tool_calls.second}}
-                        };
-                        std::string resp_ = streamPerformingOpenAIAPI(client, rmsg);
+                if (tool_calls.first == "acs45") {
+                    auto rmsg = OpenAIClient::ChatCompletionRequest{
+                        "anthropic/claude-sonnet-4.5", {{"user", tool_calls.second}}
+                    };
+                    std::string resp_ = streamPerformingOpenAIAPI(client, rmsg);
+                    req.messages.emplace_back("user", "<tool_response_begin>\n"
+                                                      "<tool_id>acs45</tool_id>\n"
+                                                      "<tool_name>Anthropic Claude Sonnet 4.5</tool_name>\n"
+                                                      "<tool_type>LLM</tool_type>\n"
+                                                      "<tool_response>" + resp_ + "</tool_response>\n"
+                                                      "<tool_response_end>");
+                } else if (tool_calls.first == "pytools") {
+                    std::string res = runPythonCode(tool_calls.second);
+                    req.messages.emplace_back("user", "<tool_response_begin>\n"
+                                                      "<tool_id>pytools</tool_id>\n"
+                                                      "<tool_name>Python Code Executor</tool_name>\n"
+                                                      "<tool_type>Code Executor</tool_type>\n"
+                                                      "<tool_response>" + res + "</tool_response>\n"
+                                                      "<tool_response_end>");
+                } else if (tool_calls.first == "imgg") {
+                    auto rmsg_img = OpenAIClient::ChatCompletionRequest{
+                        "google/gemini-2.5-flash-image", {{"user", "Generate picture: \n" + tool_calls.second}}
+                    };
+                    OpenAIClient::ChatCompletionResponse response_img = client.createChatCompletion(rmsg_img);
+                    std::string img_res;
+                    std::string txt_res_of_img;
+                    if (!response_img.choices.empty()) {
+                        for (auto i: response_img.choices) {
+                            if (!i.delta.empty()) {
+                                txt_res_of_img = i.delta;
+                            }
+                        }
+                        for (auto i: response_img.choices) {
+                            if (!i.image_b64.empty()) {
+                                img_res = i.image_b64;
+                            }
+                        }
+                    }
+                    req.messages.emplace_back("user", "<tool_response_begin>\n"
+                                                      "<tool_id>imgg</tool_id>\n"
+                                                      "<tool_name>Image Generator(Nano Banana)</tool_name>\n"
+                                                      "<tool_type>LLM with Image Gen</tool_type>\n"
+                                                      "<tool_response>LLM Text Response:" + txt_res_of_img +
+                                                      "</tool_response>\n"
+                                                      "<tool_response_end>");
+                    inp.has_img = true;
+                    inp.base64_image = img_res;
+                } else if (tool_calls.first == "kbtools") {
+                    auto input_emb = feature_extractor->extractTextFeature(tool_calls.second);
+                    auto matched_logics = logic_injector->findMatchingLogicIds(tool_calls.second);
+                    if (matched_logics.size() <= 5) {
+                        std::thread(
+                            [this, &tool_calls, input_emb, &logic_injector, &logic_tree, &feature_extractor, &
+                                rag_loader]() {
+                                try {
+                                    rag_loader.autoFetchAndRegisterLogic(
+                                        logic_injector.get(), &logic_tree, tool_calls.second);
+                                    rag_loader.autoFetchAndRegisterLogic(
+                                        logic_injector.get(), &logic_tree, tool_calls.second, 10,
+                                        "HuggingFaceFW/finepdfs", "eng_Latn",
+                                        "general");
+                                    const std::vector<std::string> all_subsets_maths = {
+                                        "Deepseek-Math-RL-7B",
+                                        "Deepseek-Math-RL-7B-T=1.1",
+                                        "Deepseek-Math-RL-7B-T=1.3",
+                                        "InternLM2-Math-Plus-7B",
+                                        "InternLM2-Math-Plus-7B-T=1.1",
+                                        "InternLM2-Math-Plus-7B-T=1.3",
+                                        "InternLM2-Math-Plus-1.8B",
+                                        "InternLM2-Math-Plus-1.8B-T=1.1"
+                                    };
+                                    if (input_emb.cosineSimilarity(feature_extractor->extractTextFeature("Maths")) >
+                                        0.6) {
+                                        for (const auto &ss: all_subsets_maths) {
+                                            rag_loader.autoFetchAndRegisterLogic(
+                                                logic_injector.get(), &logic_tree, tool_calls.second, 10,
+                                                "WNJXYK/MATH-Reasoning-Paths",
+                                                ss, "maths");
+                                        }
+                                    }
+                                    if (input_emb.cosineSimilarity(
+                                            feature_extractor->extractTextFeature("education")) > 0.6) {
+                                        rag_loader.autoFetchAndRegisterLogic(
+                                            logic_injector.get(), &logic_tree, tool_calls.second, 10,
+                                            "karpathy/fineweb-edu-100b-shuffle", "",
+                                            "education");
+                                    }
+                                    if (input_emb.cosineSimilarity(feature_extractor->extractTextFeature("coding"))
+                                        > 0.6) {
+                                        rag_loader.autoFetchAndRegisterLogic(
+                                            logic_injector.get(), &logic_tree, tool_calls.second, 10,
+                                            "nick007x/github-code-2025", "above-2-stars",
+                                            "coding");
+                                    }
+                                    if (input_emb.cosineSimilarity(
+                                            feature_extractor->extractTextFeature("cybersecurity")) >
+                                        0.6) {
+                                        rag_loader.autoFetchAndRegisterLogic(
+                                            logic_injector.get(), &logic_tree, tool_calls.second, 10,
+                                            "ethanolivertroy/nist-cybersecurity-training", "",
+                                            "cybersecurity");
+                                    }
+                                } catch (...) {
+                                    std::cerr << "WARN: RAG AutoLoading Failed" << std::endl;
+                                }
+                            }).join();
+                        auto matched_logics_new = logic_injector->findMatchingLogicIds(tool_calls.second);
+                        std::string logic_inj = "\nMatching Logics:\n";
+                        for (auto i: matched_logics_new) {
+                            logic_inj.append(i.first + "\n");
+                        }
                         req.messages.emplace_back("user", "<tool_response_begin>\n"
-                                                          "<tool_id>acs45<tool_id/>\n"
-                                                          "<tool_name>Anthropic Claude Sonnet 4.5<tool_name/>\n"
-                                                          "<tool_type>LLM<tool_type/>\n"
-                                                          "<tool_response>" + resp_ + "<tool_response/>\n"
+                                                          "<tool_id>kbtools</tool_id>\n"
+                                                          "<tool_name>RAG Database accesser</tool_name>\n"
+                                                          "<tool_type>Logic Finder</tool_type>\n"
+                                                          "<tool_response>" + logic_inj +
+                                                          "</tool_response>\n"
                                                           "<tool_response_end>");
-                        break;
-                    case "pytools":
-                        system(("python " + tool_calls.second).c_str());
+                    }
+                } else if (tool_calls.first == "stools") {
+                    std::string search_res = performSearch(tool_calls.second);
+                    req.messages.emplace_back("user", "<tool_response_begin>\n"
+                                                      "<tool_id>stools</tool_id>\n"
+                                                      "<tool_name>Web Search Engine</tool_name>\n"
+                                                      "<tool_type>Search Engine (Bing, Google, ArXiv)</tool_type>\n"
+                                                      "ᾯ5" + search_res +
+                                                      "</tool_response>\n"
+                                                      "<tool_response_end>");
+                } else if (tool_calls.first == "mtools") {
+                    std::string math_res = calculateMathExpression(tool_calls.second);
+                    req.messages.emplace_back("user", "<tool_response_begin>\n"
+                                                      "<tool_id>mtools</tool_id>\n"
+                                                      "<tool_name>LateX Expression executor</tool_name>\n"
+                                                      "<tool_type>Maths executor</tool_type>\n"
+                                                      "<tool_response>" + math_res +
+                                                      "</tool_response>\n"
+                                                      "<tool_response_end>");
+                } else {
+                    req.messages.emplace_back("user", "<error_begin>\n"
+                                              "<reason>Undefined tool id<reason/>\n"
+                                              "<error_end>");
                 }
             }
-            if (req.messages.size() > 1024) {
-                if (req.messages.size() > 1) {
-                    req.messages.erase(req.messages.begin() + 1);
-                }
+        } catch (exception &e) {
+            cerr << "Error: " << e.what() << endl;
+        }
+        if (req.messages.size() > 1024) {
+            if (req.messages.size() > 1) {
+                req.messages.erase(req.messages.begin() + 1);
             }
-        } catch (const std::exception &e) {
-            std::cerr << "Error calling API: " << e.what() << std::endl;
         }
     }
 }
 
-// 示例函数：展示如何使用图像输入功能
-void example_with_image_input(OpenAIClient::HttpClient &client, const std::string &base64_image_data) {
-    // 创建请求
-    OpenAIClient::ChatCompletionRequest req;
-    req.model = "gpt-4-vision-preview";
-    req.max_tokens = 1000;
-
-    // 创建图像内容部分
-    OpenAIClient::ChatMessageContentPart image_part(base64_image_data, "image/jpeg");
-    OpenAIClient::ChatMessageContentPart text_part("请描述这张图片的内容");
-
-    // 组合内容部分
-    std::vector<OpenAIClient::ChatMessageContentPart> parts = {text_part, image_part};
-    OpenAIClient::ChatMessage message("user", parts);
-
-    // 添加到请求中
-    req.messages.push_back(message);
-
-    // 发送请求
-    try {
-        OpenAIClient::ChatCompletionResponse response = client.createChatCompletion(req);
-        if (!response.choices.empty()) {
-            std::cout << "Image Analysis: " << response.choices[0].message.content << std::endl;
-        }
-    } catch (const std::exception &e) {
-        std::cerr << "Error calling API with image: " << e.what() << std::endl;
-    }
-}

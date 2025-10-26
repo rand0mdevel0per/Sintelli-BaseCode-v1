@@ -18,6 +18,7 @@
 #include <vector>
 #include <map>
 #include <memory>
+#include <functional>
 #include <nlohmann/json.hpp>
 
 using json = nlohmann::json;
@@ -191,15 +192,17 @@ struct ChatCompletionRequest {
  * This structure contains the response data from a chat completion request.
  */
 struct ChatCompletionResponse {
-    /**
-     * @struct Choice
-     * @brief Individual choice in the completion response
-     */
-    struct Choice {
-        int index;                ///< Index of the choice in the response
-        ChatMessage message;      ///< Generated message content
-        std::string delta;        ///< Delta content for streaming responses
-        std::string finish_reason; ///< Reason why generation stopped
+    /**
+     * @struct Choice
+     * @brief Individual choice in the completion response
+     */
+    struct Choice {
+        int index;                ///< Index of the choice in the response
+        ChatMessage message;      ///< Generated message content
+        std::string delta;        ///< Delta content for streaming responses
+        std::string finish_reason; ///< Reason why generation stopped
+        std::string image_url;    ///< URL of generated image (for image generation models)
+        std::string image_b64;    ///< Base64 encoded image data (for image generation models)
     };
     
     /**
@@ -219,60 +222,111 @@ struct ChatCompletionResponse {
     std::vector<Choice> choices; ///< Array of generated choices
     Usage usage;                 ///< Token usage information
     
-    /**
-     * @brief Create a ChatCompletionResponse from JSON
-     * 
-     * @param j JSON object containing chat completion response data
-     * @return ChatCompletionResponse Parsed response object
-     */
-    static ChatCompletionResponse from_json(const json& j) {
-        ChatCompletionResponse response;
-        if (j.contains("id")) response.id = j["id"];
-        if (j.contains("object")) response.object = j["object"];
-        if (j.contains("created")) response.created = j["created"];
-        if (j.contains("model")) response.model = j["model"];
-        
-        if (j.contains("choices") && j["choices"].is_array()) {
-            for (const auto& choice : j["choices"]) {
-                Choice c;
-                if (choice.contains("index")) c.index = choice["index"];
-                
-                if (choice.contains("delta")) {
-                    // Streaming response
-                    if (choice["delta"].contains("content")) {
-                        c.delta = choice["delta"]["content"];
-                    }
-                } else if (choice.contains("message")) {
-                    // Non-streaming response
-                    c.message.role = choice["message"]["role"];
-                    if (choice["message"].contains("content")) {
-                        c.message.content = choice["message"]["content"];
-                    }
-                }
-                
-                if (choice.contains("finish_reason")) {
-                    c.finish_reason = choice["finish_reason"];
-                }
-                response.choices.push_back(c);
-            }
-        }
-        
-        if (j.contains("usage")) {
-            if (j["usage"].contains("prompt_tokens")) response.usage.prompt_tokens = j["usage"]["prompt_tokens"];
-            if (j["usage"].contains("completion_tokens")) response.usage.completion_tokens = j["usage"]["completion_tokens"];
-            if (j["usage"].contains("total_tokens")) response.usage.total_tokens = j["usage"]["total_tokens"];
-        }
-        
-        return response;
+    /**
+     * @brief Create a ChatCompletionResponse from JSON
+     * 
+     * @param j JSON object containing chat completion response data
+     * @return ChatCompletionResponse Parsed response object
+     */
+    static ChatCompletionResponse from_json(const json& j) {
+        ChatCompletionResponse response;
+        if (j.contains("id")) response.id = j["id"];
+        if (j.contains("object")) response.object = j["object"];
+        if (j.contains("created")) response.created = j["created"];
+        if (j.contains("model")) response.model = j["model"];
+        
+        if (j.contains("choices") && j["choices"].is_array()) {
+            for (const auto& choice : j["choices"]) {
+                Choice c;
+                if (choice.contains("index")) c.index = choice["index"];
+                
+                if (choice.contains("delta")) {
+                    // Streaming response
+                    if (choice["delta"].contains("content")) {
+                        c.delta = choice["delta"]["content"];
+                    }
+                } else if (choice.contains("message")) {
+                    // Non-streaming response
+                    c.message.role = choice["message"]["role"];
+                    if (choice["message"].contains("content")) {
+                        c.message.content = choice["message"]["content"];
+                    }
+                }
+                
+                if (choice.contains("finish_reason")) {
+                    c.finish_reason = choice["finish_reason"];
+                }
+                
+                // 解析图片数据（如果有）
+                if (choice.contains("image_url")) {
+                    c.image_url = choice["image_url"];
+                }
+                if (choice.contains("image_b64")) {
+                    c.image_b64 = choice["image_b64"];
+                }
+                
+                response.choices.push_back(c);
+            }
+        }
+        
+        if (j.contains("usage")) {
+            if (j["usage"].contains("prompt_tokens")) response.usage.prompt_tokens = j["usage"]["prompt_tokens"];
+            if (j["usage"].contains("completion_tokens")) response.usage.completion_tokens = j["usage"]["completion_tokens"];
+            if (j["usage"].contains("total_tokens")) response.usage.total_tokens = j["usage"]["total_tokens"];
+        }
+        
+        return response;
     }
-};
-
-/**
- * @struct TrainingJobRequest
- * @brief Request structure for creating a fine-tuning job
- * 
- * This structure contains all parameters needed to create a fine-tuning job
- * for training a custom model.
+};
+
+/**
+ * @struct ImageGenerationResponse
+ * @brief Response structure for image generation API
+ * 
+ * This structure contains the response data from an image generation request.
+ */
+struct ImageGenerationResponse {
+    std::string id;              ///< Unique identifier for the generation
+    std::string object;          ///< Object type (e.g., "image")
+    long created;                ///< Unix timestamp of creation
+    std::vector<ChatMessageContentPart> data; ///< Array of generated images
+    std::string model;           ///< Model used for generation
+    
+    /**
+     * @brief Create an ImageGenerationResponse from JSON
+     * 
+     * @param j JSON object containing image generation response data
+     * @return ImageGenerationResponse Parsed response object
+     */
+    static ImageGenerationResponse from_json(const json& j) {
+        ImageGenerationResponse response;
+        if (j.contains("id")) response.id = j["id"];
+        if (j.contains("object")) response.object = j["object"];
+        if (j.contains("created")) response.created = j["created"];
+        if (j.contains("model")) response.model = j["model"];
+        
+        if (j.contains("data") && j["data"].is_array()) {
+            for (const auto& item : j["data"]) {
+                if (item.contains("b64_json")) {
+                    // Base64 encoded image data
+                    response.data.emplace_back(item["b64_json"], "image/png");
+                } else if (item.contains("url")) {
+                    // Image URL
+                    response.data.emplace_back(item["url"]);
+                }
+            }
+        }
+        
+        return response;
+    }
+};
+
+/**
+ * @struct TrainingJobRequest
+ * @brief Request structure for creating a fine-tuning job
+ * 
+ * This structure contains all parameters needed to create a fine-tuning job
+ * for training a custom model.
  */
 struct TrainingJobRequest {
     std::string model;           ///< Base model to fine-tune

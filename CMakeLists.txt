@@ -186,16 +186,24 @@ install(TARGETS src
         RUNTIME DESTINATION ${Python3_SITELIB}
 )
 
-# =============================================================================
-# 输出信息
-# =============================================================================
-
-message(STATUS "")
-message(STATUS "========================================")
-message(STATUS "项目配置完成")
-message(STATUS "========================================")
-message(STATUS "输出: sintelli_base${CMAKE_SHARED_LIBRARY_SUFFIX}")
-message(STATUS "Python: ${Python3_VERSION}")
-message(STATUS "CUDA: ${CUDAToolkit_VERSION}")
-message(STATUS "========================================")
+# =============================================================================
+# 可执行文件配置
+# =============================================================================
+
+add_executable(test_mtools test_mtools.cpp)
+target_link_libraries(test_mtools PRIVATE src)
+
+# =============================================================================
+# 输出信息
+# =============================================================================
+
+message(STATUS "")
+message(STATUS "========================================")
+message(STATUS "项目配置完成")
+message(STATUS "========================================")
+message(STATUS "输出: sintelli_base${CMAKE_SHARED_LIBRARY_SUFFIX}")
+message(STATUS "测试程序: test_mtools")
+message(STATUS "Python: ${Python3_VERSION}")
+message(STATUS "CUDA: ${CUDAToolkit_VERSION}")
+message(STATUS "========================================")
 message(STATUS "")

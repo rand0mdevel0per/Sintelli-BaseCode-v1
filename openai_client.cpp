@@ -11,11 +11,11 @@
  * @copyright MIT License
  */
 
-#include "openai_client.h"
-#include <curl/curl.h>
-#include <iostream>
-#include <sstream>
-#include <stdexcept>
+#include "openai_client.h"
+#include <curl/curl.h>
+#include <iostream>
+#include <sstream>
+#include <stdexcept>
 #include <functional>
 
 using namespace OpenAIClient;
@@ -658,4 +658,171 @@ bool HttpClient::deleteFile(const std::string& file_id) {
     
     // Send DELETE request and return success status
     return http.delete_request(url, headers);
+}
+
+/**
+ * @brief Create a streaming chat completion using the OpenAI-compatible API
+ * 
+ * Sends a chat completion request with streaming enabled and processes
+ * the Server-Sent Events (SSE) responses as they arrive via callback.
+ * 
+ * @param request The chat completion request parameters (stream should be true)
+ * @param callback Callback function to handle each streaming response
+ * @throws std::runtime_error if the request fails
+ */
+void HttpClient::createChatCompletionStream(const ChatCompletionRequest& request, 
+                                           std::function<void(const ChatCompletionResponse&)> callback) {
+    SimpleHttpClient http;
+    std::string url = get_base_url() + "/chat/completions";
+    
+    // Set required headers for authentication and content type
+    std::map<std::string, std::string> headers = {
+        {"Content-Type", "application/json"},
+        {"Authorization", "Bearer " + get_api_key()}
+    };
+    
+    // Add organization header if specified
+    if (!get_organization().empty()) {
+        headers["OpenAI-Organization"] = get_organization();
+    }
+    
+    // Create a mutable copy of request with stream enabled
+    ChatCompletionRequest stream_request = request;
+    stream_request.stream = true;
+    
+    // Convert request to JSON
+    std::string request_json = stream_request.to_json().dump();
+    
+    // Define streaming callback to process Server-Sent Events (SSE)
+    auto stream_callback = [callback](const std::string& data) {
+        // Process Server-Sent Events (SSE) format
+        if (data.substr(0, 5) == "data:") {
+            std::string json_str = data.substr(5);
+            // Remove leading whitespaces
+            json_str.erase(0, json_str.find_first_not_of(" \t"));
+            
+            // Check if it's the end marker
+            if (json_str == "[DONE]") {
+                return; // End of stream
+            }
+            
+            try {
+                json chunk = json::parse(json_str);
+                
+                // Create a response object from the chunk
+                ChatCompletionResponse response;
+                if (chunk.contains("id")) response.id = chunk["id"];
+                if (chunk.contains("object")) response.object = chunk["object"];
+                if (chunk.contains("created")) response.created = chunk["created"];
+                if (chunk.contains("model")) response.model = chunk["model"];
+                
+                // Process choices
+                if (chunk.contains("choices") && chunk["choices"].is_array()) {
+                    for (const auto& choice : chunk["choices"]) {
+                        ChatCompletionResponse::Choice resp_choice;
+                        resp_choice.index = choice["index"];
+                        
+                        if (choice.contains("delta") && choice["delta"].contains("content")) {
+                            resp_choice.delta = choice["delta"]["content"];
+                        } else if (choice.contains("text")) {
+                            resp_choice.delta = choice["text"];
+                        }
+                        
+                        if (choice.contains("finish_reason") && !choice["finish_reason"].is_null()) {
+                            resp_choice.finish_reason = choice["finish_reason"];
+                        }
+                        
+                        // Process message if present
+                        if (choice.contains("message") && choice["message"].contains("content")) {
+                            resp_choice.message.content = choice["message"]["content"];
+                            if (choice["message"].contains("role")) {
+                                resp_choice.message.role = choice["message"]["role"];
+                            }
+                        }
+                        
+                        // Process image data if present
+                        if (choice.contains("image_url")) {
+                            resp_choice.image_url = choice["image_url"];
+                        }
+                        if (choice.contains("image_b64")) {
+                            resp_choice.image_b64 = choice["image_b64"];
+                        }
+                        
+                        response.choices.push_back(resp_choice);
+                    }
+                }
+                
+                // Process token usage if present
+                if (chunk.contains("usage")) {
+                    if (chunk["usage"].contains("prompt_tokens")) {
+                        response.usage.prompt_tokens = chunk["usage"]["prompt_tokens"];
+                    }
+                    if (chunk["usage"].contains("completion_tokens")) {
+                        response.usage.completion_tokens = chunk["usage"]["completion_tokens"];
+                    }
+                    if (chunk["usage"].contains("total_tokens")) {
+                        response.usage.total_tokens = chunk["usage"]["total_tokens"];
+                    }
+                }
+                
+                // Call the provided callback with the processed response
+                callback(response);
+                
+            } catch (const std::exception& e) {
+                // Silently ignore malformed JSON chunks
+            }
+        }
+    };
+    
+    // Send streaming POST request
+    http.post_stream(url, request_json, headers, stream_callback);
+}
+
+/**
+ * @brief Create an image using the image generation API
+ * 
+ * Sends an image generation request and returns the generated image URL or base64 data.
+ * 
+ * @param prompt Text description of the image to generate
+ * @param n Number of images to generate (default: 1)
+ * @param size Size of the generated image (default: "1024x1024")
+ * @param response_format Format of the response ("url" or "b64_json", default: "url")
+ * @return ImageGenerationResponse Generated image data
+ * @throws std::runtime_error if the request fails
+ */
+ImageGenerationResponse HttpClient::createImage(const std::string& prompt, int n, const std::string& size, const std::string& response_format) {
+    SimpleHttpClient http;
+    std::string url = get_base_url() + "/images/generations";
+    
+    // Set required headers for authentication and content type
+    std::map<std::string, std::string> headers = {
+        {"Content-Type", "application/json"},
+        {"Authorization", "Bearer " + get_api_key()}
+    };
+    
+    // Add organization header if specified
+    if (!get_organization().empty()) {
+        headers["OpenAI-Organization"] = get_organization();
+    }
+    
+    // Create request JSON
+    json request_json;
+    request_json["prompt"] = prompt;
+    request_json["n"] = n;
+    request_json["size"] = size;
+    request_json["response_format"] = response_format;
+    
+    // Convert to string
+    std::string request_data = request_json.dump();
+    
+    // Send POST request
+    std::string response_json = http.post(url, request_data, headers);
+    
+    // Parse and return the response
+    try {
+        json response = json::parse(response_json);
+        return ImageGenerationResponse::from_json(response);
+    } catch (const std::exception& e) {
+        throw std::runtime_error("Failed to parse image generation response: " + std::string(e.what()));
+    }
 }
