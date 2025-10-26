@@ -632,8 +632,8 @@ public:
 private:
     ull GRID_SIZE = 32;
     cudaStream_t streams[4];
-    __managed__ bool *d_active_flags;
-    __managed__ double *d_trace;
+    bool *d_active_flags;
+    double *d_trace;
     std::thread eventloop;
     ull NEURON_COUNT = 0; // Will be initialized in constructor
     ull THREADS_PER_BLOCK = 256;
@@ -669,8 +669,8 @@ private:
 
     RAGKnowledgeBaseLoader rag_loader;
 
-    __managed__ double score;
-    __managed__ bool training;
+    double score;
+    bool training;
 
     bool apply_trace() {
         if (!training) return false;

@@ -46,6 +46,16 @@ private:
 public:
     SemanticQueryCache(size_t max_size = 1000, std::chrono::seconds ttl = std::chrono::seconds(300))
         : max_cache_size(max_size), cache_ttl(ttl) {}
+
+    SemanticQueryCache(const SemanticQueryCache& other) {
+        cache = other.cache;
+        max_cache_size = other.max_cache_size;
+        cache_ttl = other.cache_ttl;
+    }
+
+    SemanticQueryCache operator=(const SemanticQueryCache other) {
+        return SemanticQueryCache(other);
+    }
     
     // 尝试从缓存获取结果
     bool tryGetFromCache(const std::string& query, 
@@ -134,7 +144,15 @@ private:
 public:
     ContextAwareQueryProcessor(SemanticQueryCache& query_cache, size_t window_size = 10)
         : cache(query_cache), context_window(window_size) {}
-    
+    ContextAwareQueryProcessor(const ContextAwareQueryProcessor& other) : cache() {
+        cache = other.cache;
+        recent_queries = other.recent_queries;
+        context_window = other.context_window;
+    }
+    ContextAwareQueryProcessor operator=(const ContextAwareQueryProcessor& other) {
+        return ContextAwareQueryProcessor(other);
+    }
+
     // 带上下文的查询处理
     std::vector<std::pair<LogicDescriptor, double>> 
     processWithContext(const std::string& current_query,

@@ -3,6 +3,7 @@
 //
 // 知识片段引擎(KFE)工具集：包含高效哈希算法
 //
+#pragma once
 #ifndef KFE_UTILS_CUH
 #define KFE_UTILS_CUH
 
@@ -91,6 +92,9 @@ __device__ __forceinline__ uint32_t MurmurHash3_32(const void* key, int len, uin
 
 #endif // KFE_UTILS_CUH
 
+
+#ifndef SHA256_UTILS
+#define SHA256_UTILS
 // 移除重复的头文件保护，合并到KFE_UTILS_CUH中
 
 // =================================================================
@@ -342,5 +346,5 @@ void test_sha256() {
 }
 */
 
-
+#endif
 
