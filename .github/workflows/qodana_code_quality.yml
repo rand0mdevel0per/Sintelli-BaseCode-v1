@@ -25,11 +25,6 @@ jobs:
           linter: jetbrains/qodana-clang:latest
           results-dir: ${{ runner.temp }}/qodana/results
           cache-dir: ${{ runner.temp }}/qodana/cache
-          
-          # 额外参数
-          args: |
-            --fail-threshold 0
-          
           pr-mode: false
         env:
           QODANA_TOKEN: ${{ secrets.QODANA_TOKEN_1824339855 }}
