@@ -1,29 +1,36 @@
 # Sintelli-BaseCode-v1
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![CUDA](https://img.shields.io/badge/CUDA-12.x-green.svg)](https://developer.nvidia.com/cuda-toolkit)
+[![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
+[![C++20](https://img.shields.io/badge/C++-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
+
+**3D Neural Network Simulation powered by CUDA** 🧠⚡
+
 ## Overview
 
 This is a CUDA-based neural network simulation project designed to build a large-scale neuronal network in three-dimensional space. The project leverages GPU parallel computing capabilities to simulate neuron behavior, connections, and information transmission.
 
 ## Key Features
 
-- High-performance computing based on CUDA
+- High-performance computing powered by CUDA
 - Three-dimensional spatial neuron network topology
-- Support for adaptive message compression and routing
+- Adaptive message compression and routing
 - Integrated KFE (Knowledge Feature Encoding) short-term memory system
-- Support for convolution and GEMM inference operations
-- C++/CUDA C mixed programming
+- Convolution and GEMM inference operations
+- C++/CUDA mixed programming
 
 ## Technology Stack
 
-- **Primary Language**: C++ (C++20 standard), CUDA C
+- **Primary Languages**: C++20, CUDA C
 - **Build System**: CMake (minimum version 3.18)
 - **Dependency Management**: vcpkg
-- **CUDA Architecture**: Supports modern GPU architectures such as sm_75, sm_80, sm_86
+- **CUDA Architecture**: Supports modern GPU architectures (sm_75, sm_80, sm_86, sm_89)
 - **Third-party Libraries**: 
-  - CUTLASS (for CUDA-optimized GEMM operations)
+  - CUTLASS (CUDA-optimized GEMM operations)
   - LibLZMA (data compression)
   - nlohmann/json (JSON processing)
-  - Crow (C++ Web framework for potential web interfaces)
+  - Crow (C++ web framework)
 
 ## Directory Structure
 
@@ -34,7 +41,7 @@ src/
 ├── Matrix operations (matrixMultiplex.cpp)
 ├── Message encoding/decoding (converter.h, converter.cpp)
 ├── Data structure definitions (structs.h, conv16_res_msg.h)
-├── Utility header files (hasher.h, isw.hpp, sct.hpp, wss.hpp)
+├── Utility headers (hasher.h, isw.hpp, sct.hpp, wss.hpp)
 ├── Third-party libraries (cutlass/, json/)
 ├── Model files (models/)
 ├── Build directories (cmake-build-debug/, cmake-build-debug-visual-studio/)
@@ -51,27 +58,28 @@ Implementation of a complex neuron model that simulates biological neural comput
 
 Each neuron in the network is represented by the `Neuron` class, which contains:
 
-- **3D Spatial Positioning**: Each neuron has coordinates (x, y, z) in a 3D grid, allowing for spatial organization and locality-based connections.
-- **6-Directional Neighbor Connections**: Neurons can connect to neighbors in the ±X, ±Y, and ±Z directions, forming a 3D lattice structure.
-- **4-Logical Port Input/Output System**: Each neuron has 4 logical ports for input and output, enabling multi-channel communication.
-- **KFE Short-Term Memory System**: A knowledge feature encoding system for contextual memory and learning.
-- **Convolution and GEMM Inference Capabilities**: Support for both convolutional and matrix multiplication-based computations.
-- **Port Transformation Matrices**: Hebbian learning-based matrices for feature transformation between ports.
+- **3D Spatial Positioning**: Each neuron has coordinates (x, y, z) in a 3D grid, enabling spatial organization and locality-based connections
+- **6-Directional Neighbor Connections**: Neurons can connect to neighbors in ±X, ±Y, and ±Z directions, forming a 3D lattice structure
+- **4-Logical Port I/O System**: Each neuron has 4 logical ports for input and output, enabling multi-channel communication
+- **KFE Short-Term Memory System**: A knowledge feature encoding system for contextual memory and learning
+- **Convolution and GEMM Inference**: Support for both convolutional and matrix multiplication-based computations
+- **Port Transformation Matrices**: Hebbian learning-based matrices for feature transformation between ports
 
 #### Core Computational Flow
 
-The neuron's computation follows a detailed flow within the `step()` function:
+The neuron's computation follows this flow in the `step()` function:
 
 1. **Message Processing**: Handle incoming messages from other neurons
-   - If queue is not empty, process the message using `processMessage()`
-   - Route or receive data messages, forward or reply to connection requests, process connection replies
+   - Process messages from queue using `processMessage()`
+   - Route or receive data messages
+   - Forward or reply to connection requests
 
 2. **Input Processing**: Process data from input ports
    - For each port with input data, execute `processUpdate()`
-   - Only proceed to output broadcast if there was input
+   - Proceed to output broadcast only if there was input
 
 3. **Output Broadcast**: Send results to connected neurons
-   - For each output connection, create and route output messages
+   - Create and route output messages for each output connection
    - Update convolution kernels for all ports
 
 4. **Maintenance**: Update internal state and perform housekeeping
@@ -89,13 +97,13 @@ The `processUpdate()` function is the core of neuron computation:
 
 1. **Neighbor Input Aggregation**:
    - Reset `PS_aggregate` matrix to zero
-   - For each of the 4 ports, if there's input:
-     - Get front input from port queue
+   - For each of the 4 ports with input:
+     - Retrieve input from port queue
      - Transform input using `input_multiplex_array`
-     - Extract convolution features using `extractConvFeatures()`
+     - Extract convolution features via `extractConvFeatures()`
      - Calculate attention score
      - Aggregate features using `aggregateFeatures()`
-     - Weight the input and accumulate in `PS_aggregate`
+     - Weight and accumulate in `PS_aggregate`
 
 2. **Normalization**:
    - Normalize `PS_aggregate` by total weight if weight_sum > 1e-6
@@ -110,7 +118,7 @@ The `processUpdate()` function is the core of neuron computation:
    - Compute STM aggregate utility using `computeKFEAttention()`
 
 6. **Gating Decision**:
-   - Determine whether to trigger GEMM:
+   - Determine whether to trigger GEMM based on:
      - Periodic heartbeat (every 16 steps)
      - High external demand (deviation_norm > 0.5)
      - Internal crisis (core_vulnerability > 0.7)
@@ -119,105 +127,117 @@ The `processUpdate()` function is the core of neuron computation:
 
 7. **Output Broadcasting**:
    - Execute `broadcastOutput()`
-   - Update convolution kernels for all ports using `updateConvKernels()`
+   - Update convolution kernels for all ports via `updateConvKernels()`
 
 ##### GEMM Inference with DRC
 
-The neuron's core computation is based on General Matrix Multiply (GEMM) operations with Dynamic Recalibration Correction (DRC):
+The neuron's core computation uses General Matrix Multiply (GEMM) operations with Dynamic Recalibration Correction (DRC):
 
 1. **Positional Encoding**:
    - Add positional encoding to `P_Matrix` using `addPositionalEncoding()`
 
 2. **GEMM Core Inference**:
-   $P_{Next} = \text{GELU}(P_{Matrix} \times W_{predict} + M_{KFE})$
-
+   ```
+   P_Next = GELU(P_Matrix × W_predict + M_KFE)
+   ```
+   
    Where:
-   - $P_{Matrix}$ is the current state matrix (256×256)
-   - $W_{predict}$ is the autoregressive weight matrix (256×256)
-   - $M_{KFE}$ is the knowledge context matrix from KFE (256×256)
-   - GELU is the Gaussian Error Linear Unit activation function
+   - `P_Matrix`: Current state matrix (256×256)
+   - `W_predict`: Autoregressive weight matrix (256×256)
+   - `M_KFE`: Knowledge context matrix from KFE (256×256)
+   - GELU: Gaussian Error Linear Unit activation function
 
 3. **Fixed Target Computation**:
-   $T_{fixed} = \alpha \cdot PS_{aggregate} + (1-\alpha) \cdot P_{Next}$
+   ```
+   T_fixed = α · PS_aggregate + (1-α) · P_Next
+   ```
 
-4. **DRC Iterative Correction**:
-   For 16 iterations:
-   $P_{new} = P_{current} + V_{corr} + M_{attn} + V_{hist}$
-
+4. **DRC Iterative Correction** (16 iterations):
+   ```
+   P_new = P_current + V_corr + M_attn + V_hist
+   ```
+   
    Where:
-   - $V_{corr} = (T_{fixed} - P_{current}) \cdot \eta_{base}$ (basic correction term)
-   - $M_{attn}$ is the attention-modulated correction
-   - $V_{hist}$ is the historical momentum term
+   - `V_corr = (T_fixed - P_current) · η_base`: Basic correction term
+   - `M_attn`: Attention-modulated correction
+   - `V_hist`: Historical momentum term
 
 5. **Noise Prediction and Denoising**:
    - Predict noise using `predictNoise()`
-   - Apply denoising process with cosine noise schedule
+   - Apply denoising with cosine noise schedule
 
 6. **State Synchronization**:
    - Copy `P_current` to `P_Matrix` and `P_stable`
-   - Update core vulnerability using `updateCoreVulnerability()`
+   - Update core vulnerability via `updateCoreVulnerability()`
 
 ##### Selective State Space Model (SSM)
 
 The neuron implements a selective SSM mechanism:
 
 1. **Input Projection**:
-   $B[i] = \text{GELU}(\frac{1}{256} \sum_{j=0}^{255} PS_{aggregate}[i][j])$ (Input gate)
-   $C[i] = \text{GELU}(-\frac{1}{256} \sum_{j=0}^{255} PS_{aggregate}[i][j])$ (Output gate)
+   ```
+   B[i] = GELU(mean(PS_aggregate[i][:])) 
+   C[i] = GELU(-mean(PS_aggregate[i][:]))
+   ```
 
 2. **State Update**:
-   $\Delta[i] = B[i] \cdot PS_{aggregate}[i][0]$
-   $h_{state}[i] = 0.9 \cdot h_{state}[i] + \Delta[i]$
+   ```
+   Δ[i] = B[i] · PS_aggregate[i][0]
+   h_state[i] = 0.9 · h_state[i] + Δ[i]
+   ```
 
 3. **Output Projection**:
-   $P_{Matrix}[i][j] += C[i] \cdot h_{state}[i]$
+   ```
+   P_Matrix[i][j] += C[i] · h_state[i]
+   ```
 
 ##### Convolution Operations
 
 The neuron implements 8×8 convolution operations with stride=8 for feature extraction:
 
 1. **Forward Convolution**:
-   For input $I$ and kernel $K$:
-   $O[i,j] = \text{ReLU}(\sum_{ki=0}^{7} \sum_{kj=0}^{7} I[i \cdot 8 + ki, j \cdot 8 + kj] \cdot K[ki,kj] + b)$
+   ```
+   O[i,j] = ReLU(Σ(I[i·8+ki, j·8+kj] · K[ki,kj]) + b)
+   ```
 
 2. **Deconvolution**:
-   For feature map $F$ and kernel $K$:
-   $O[i \cdot 8 + ki, j \cdot 8 + kj] += F[i,j] \cdot K[ki,kj]$
+   ```
+   O[i·8+ki, j·8+kj] += F[i,j] · K[ki,kj]
+   ```
 
 3. **Feature Aggregation**:
    - Deconvolve 8 feature maps
-   - Weighted fusion: $output[i][j] = \sum_{k=0}^{7} temp\_outputs[k][i][j] / 8.0$
+   - Weighted fusion: `output[i][j] = Σ(temp_outputs[k][i][j]) / 8.0`
 
 4. **Kernel Update**:
    - Compute gradients using feature maps and deviation
-   - Update weights: $input\_conv\_kernels[port][k].kernel[ki][kj] -= learning\_rate \cdot grad / (32.0 \cdot 32.0)$
-   - Update bias: $input\_conv\_kernels[port][k].bias -= learning\_rate \cdot bias\_grad / (32.0 \cdot 32.0)$
+   - Update weights: `kernel[ki][kj] -= learning_rate · grad / (32² )`
+   - Update bias: `bias -= learning_rate · bias_grad / (32²)`
 
 ##### Attention Mechanisms
 
 ###### KFE Attention
 
-The Knowledge Feature Encoding (KFE) system uses attention mechanisms to focus on relevant knowledge fragments:
+The Knowledge Feature Encoding (KFE) system uses attention to focus on relevant knowledge fragments:
 
-$\text{AttentionWeight} = \frac{1}{1 + e^{-\text{dot\_product}}}$
-
-$\text{WeightedAttention} = \text{AttentionWeight} \cdot I_{core}$
-
-$M_{KFE}[i,j] += \text{WeightedAttention} \cdot V_{mem}[i,j]$
+```
+AttentionWeight = 1 / (1 + exp(-dot_product))
+WeightedAttention = AttentionWeight · I_core
+M_KFE[i,j] += WeightedAttention · V_mem[i,j]
+```
 
 ###### Neighbor Aggregation Attention
 
-The neuron aggregates inputs from neighbors using an attention mechanism:
-
-$\text{score} = \frac{\sum_{i=0}^{255} \sum_{j=0}^{255} P_{Matrix}[i][j] \cdot \text{transformed\_input}[i][j]}{256}$
-
-$\text{PS\_aggregate}[i][j] += \text{transformed\_input}[i][j] \cdot w \cdot \text{aggregated}[i][j] \cdot \text{score} + \frac{\text{wkv}}{\text{wkv} + \text{state}}$
+```
+score = Σ(P_Matrix[i][j] · transformed_input[i][j]) / 256
+PS_aggregate[i][j] += transformed_input[i][j] · w · aggregated[i][j] · score + wkv/(wkv + state)
+```
 
 ###### Importance Computation
 
-The neuron computes its importance for message routing:
-
-$\text{importance} = 0.4 \cdot \text{core\_vulnerability} + 0.3 \cdot \text{activity} + 0.2 \cdot \min(\text{deviation\_norm}, 1.0) + 0.1 \cdot \text{conn\_ratio}$
+```
+importance = 0.4·core_vulnerability + 0.3·activity + 0.2·min(deviation_norm,1.0) + 0.1·conn_ratio
+```
 
 #### Message Routing and Compression
 
@@ -231,7 +251,7 @@ Messages are routed greedily in 3D space based on destination coordinates.
 
 ### 2. Device Queue (deviceQueue.cpp)
 
-Implementation of a thread-safe CUDA device-side queue for message passing between neurons. The queue uses atomic operations to ensure thread safety:
+Thread-safe CUDA device-side queue for message passing between neurons using atomic operations:
 
 ```cpp
 __device__ bool push(const T &item) {
@@ -241,7 +261,7 @@ __device__ bool push(const T &item) {
         atomicAdd(&tail, -1LL);
         return false;
     }
-    int pos = (int) (old_tail % CAPACITY);
+    int pos = (int)(old_tail % CAPACITY);
     data[pos] = item;
     return true;
 }
@@ -249,16 +269,16 @@ __device__ bool push(const T &item) {
 
 ### 3. Neuron Model Management (NeuronModel.cu)
 
-The `NeuronModel` class manages the 3D grid of neurons, handling:
+The `NeuronModel` class manages the 3D grid of neurons:
 
 - Neuron allocation and initialization
 - Inter-neuron connectivity setup
 - Integration with semantic matching systems
-- Serialization and deserialization of model state
+- Model state serialization/deserialization
 
 #### 3D Grid Initialization
 
-Neurons are arranged in a 3D grid with size GRID_SIZE³. Each neuron is initialized with:
+Neurons are arranged in a `GRID_SIZE³` 3D grid. Each neuron is initialized with:
 
 - Neighbor queue connections in 6 directions
 - Random seed for stochastic operations
@@ -267,7 +287,7 @@ Neurons are arranged in a 3D grid with size GRID_SIZE³. Each neuron is initiali
 
 #### Parallel Processing Loop
 
-The main processing loop executes neuron computations in parallel streams:
+The main processing loop executes neuron computations in parallel:
 
 1. **Input Processing**: Process input blocks from various processors
 2. **Neuron Computation**: Execute neuron computations in parallel streams
@@ -277,33 +297,92 @@ The main processing loop executes neuron computations in parallel streams:
 
 ### 4. Encoding/Decoding System (converter.h/cpp)
 
-Implementation of matrix to UTF-8 string encoding functionality for data storage and transmission, using a custom encoding scheme that preserves numerical precision while reducing storage requirements.
+Matrix to UTF-8 string encoding for data storage and transmission, using a custom encoding scheme that preserves numerical precision while reducing storage requirements.
 
 ## Build and Run
 
-### Environment Requirements
-- CUDA Toolkit (recommended 11.x or 12.x)
-- Compiler supporting C++20 (Visual Studio 2022 recommended)
+### Requirements
+- CUDA Toolkit (11.x or 12.x recommended)
+- C++20-capable compiler (Visual Studio 2022 recommended for Windows)
 - CMake 3.18+
 - vcpkg package manager
 
 ### Build Steps
 ```bash
-# Using Visual Studio generator
+# Configure with Visual Studio generator
 cmake -B cmake-build-debug -S . -G "Visual Studio 17 2022"
-cmake --build cmake-build-debug
+
+# Build
+cmake --build cmake-build-debug --config Release
+
+# Or use Ninja for faster builds
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
 ```
 
 ### Usage
-Import the generated .so/.pyd/.dll file in python and use it.
+Use the `sintelliv1` Python package to interact with the model:
 
-## Development Conventions
+```python
+import sintelliv1.sintelli_base as sintelli
 
-1. **CUDA Programming**: Use modern CUDA programming practices, including unified memory, streams, and asynchronous operations
-2. **Memory Management**: Manual memory management, avoiding STL containers like std::string that may have issues on the device side
-3. **Error Handling**: Use CUDA error checking macros to ensure the correctness of GPU operations
-4. **Code Style**: Follow C++ Core Guidelines, using clang-format to format code
+# Create and start model
+sintelli.create_model(grid_size=10)
+sintelli.start_model()
+
+# Input text
+sintelli.input(text="Hello, Sintelli!")
+
+# Get output
+output = sintelli.get_next_output(timeout=2.0)
+print(output)
+
+# Cleanup
+sintelli.stop_model()
+sintelli.destroy_model()
+```
+
+## Development Guidelines
+
+1. **CUDA Programming**: Use modern CUDA practices including unified memory, streams, and asynchronous operations
+2. **Memory Management**: Manual memory management; avoid STL containers like `std::string` that may have device-side issues
+3. **Error Handling**: Use CUDA error checking macros to ensure correctness
+4. **Code Style**: Follow C++ Core Guidelines; use clang-format for formatting
 5. **Naming Conventions**: 
-   - Class names use PascalCase
-   - Functions and variables use snake_case
-   - Macro definitions use UPPER_SNAKE_CASE
+   - Classes: PascalCase (e.g., `NeuronModel`)
+   - Functions/variables: snake_case (e.g., `process_update`)
+   - Macros: UPPER_SNAKE_CASE (e.g., `CUDA_CHECK`)
+
+## Contributing
+
+Contributions are welcome! Please:
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes with tests
+4. Submit a pull request
+
+## License
+
+MIT License - see LICENSE file for details
+
+## Citation
+
+If you use this code in your research, please cite:
+
+```bibtex
+@software{sintelli2025,
+  author = {rand0mdevel0per},
+  title = {Sintelli: CUDA-based 3D Neural Network Simulation},
+  year = {2025},
+  url = {https://github.com/rand0mdevel0per/Sintelli-BaseCode-v1}
+}
+```
+
+## Contact
+
+- GitHub: [@rand0mdevel0per](https://github.com/rand0mdevel0per)
+- Email: rand0mk4cas@gmail.com
+
+---
+
+**Built with 🐱 and CUDA**

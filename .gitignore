@@ -1,5 +1,5 @@
 # Build directories
-# build/
+build/
 cmake-build-*/
 test-build/
 
@@ -11,10 +11,10 @@ test-build/
 .cache/
 
 # External libraries (already managed by vcpkg)
-cutlass/
-json/
+#cutlass/
+#json/
 #tokenizers/
-onnx/
+#onnx/
 
 # vcpkg installed dependencies
 vcpkg_installed/
@@ -44,7 +44,7 @@ cmake_install.cmake
 *.cmake
 
 # Compilation databases
-# build/compile_commands.json
+build/compile_commands.json
 
 # Logs and temporary files
 *.log
@@ -53,3 +53,4 @@ cmake_install.cmake
 progress.md
 progress.archieve.md
 IFLOW.md
+progress.archive.md

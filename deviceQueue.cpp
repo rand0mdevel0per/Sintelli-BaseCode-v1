@@ -6,6 +6,7 @@
 #define CUDA_DEVICE_QUEUE_CUH
 
 #include <cuda_runtime.h>
+#include <device_atomic_functions.h>
 
 template<typename T, int CAPACITY>
 struct DeviceQueue {

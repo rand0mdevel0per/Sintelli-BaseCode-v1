@@ -86,11 +86,9 @@ add_library(src SHARED
         converter.cpp
         bpe_tokenizer.cpp
         smry.cpp
-        model_process.cpp
         stb_image_write.h
         openai_client.cpp
         openai_client.h
-        central_router.cpp
         logic_semantic_matcher.cpp
         GPUMutex.cu
         rag_knowledge_loader.cpp

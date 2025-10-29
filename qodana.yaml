@@ -1,0 +1,15 @@
+# qodana.yaml
+version: "1.0"
+linter: jetbrains/qodana-clang:2025.2
+
+inspections:
+  - name: ClangTidy
+    enabled: true
+  - name: CppDFAMemoryLeak
+    enabled: true
+  - name: UnusedGlobalDeclaration
+    enabled: true
+  - name: UnusedLocalVariable
+    enabled: true
+
+failThreshold: 0
