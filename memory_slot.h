@@ -29,6 +29,11 @@ struct MemorySlot {
         return sha256_hash<MemorySlot>(*this);
     }
 
+    // 用于ExternalStorage的语义查询
+    [[nodiscard]] std::string getText() const {
+        return content;
+    }
+
     // 序列化支持
     bool serialize(std::ostream& os) const {
         os.write(reinterpret_cast<const char*>(this), sizeof(MemorySlot));

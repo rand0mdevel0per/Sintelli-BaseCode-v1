@@ -54,3 +54,15 @@ progress.md
 progress.archieve.md
 IFLOW.md
 progress.archive.md
+
+@"
+# Build
+*.pdb
+*.ipdb
+
+# vcpkg
+
+# Python
+__pycache__/
+*.pyc
+"@ | Out-File -Encoding UTF8 .gitignore -Append

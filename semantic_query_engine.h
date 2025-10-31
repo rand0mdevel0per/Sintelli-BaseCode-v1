@@ -14,7 +14,7 @@ private:
     bool is_initialized_;
 
 public:
-    SemanticQueryEngine(const std::string &model_path = "/models/e5/e5_large.onnx",
+    explicit SemanticQueryEngine(const std::string &model_path = "/models/e5/e5_large.onnx",
                         const std::string &vocab_path = "/models/e5/vocab.json",
                         const std::string &merges_path = "/models/e5/merges.txt",
                         const std::string &special_tokens_path = "/models/e5/special_tokens.json");

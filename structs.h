@@ -64,6 +64,15 @@ struct KFE_STM_Slot {
     __device__ void conv() {
         ConvResidualProcessor::conv2d_16x16(Vmem, ConvKernel16(), conv16);
     }
+    
+    // 添加getText函数以支持ExternalStorage的语义查询
+    std::string getText() const {
+        // 将矩阵数据转换为字符串表示
+        std::string text = "KFE_STM_Slot: Ulocal=" + std::to_string(Ulocal) + 
+                          ", Rcycles=" + std::to_string(Rcycles) + 
+                          ", Icore=" + std::to_string(Icore);
+        return text;
+    }
 };
 
 /**
@@ -84,6 +93,13 @@ struct Logic {
     double importance;
     std::string hash() {
         return sha256_hash<Logic>(*this);
+    }
+    
+    // 添加getText函数以支持ExternalStorage的语义查询
+    std::string getText() const {
+        // 将wchar_t数组转换为std::string
+        std::wstring wstr(content);
+        return std::string(wstr.begin(), wstr.end());
     }
 };
 

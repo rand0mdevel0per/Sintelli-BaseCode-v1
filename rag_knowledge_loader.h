@@ -37,6 +37,11 @@ struct KnowledgeEntry {
         // 简单的hash实现，可以使用title和content的组合
         return std::to_string(std::hash<std::string>{}(title + content));
     }
+    
+    // 添加getText函数以支持ExternalStorage的语义查询
+    std::string getText() const {
+        return content;
+    }
 };
 
 // RAG知识库加载器类

@@ -16,7 +16,7 @@
 
 #include <iostream>
 #include "deviceQueue.cpp"
-#include "matrixMultiplex.cpp"
+#include "matrixMultiplex.cu"
 #include <curand_kernel.h>
 #include "cern.cuh"
 #include "isw.hpp"
@@ -90,9 +90,9 @@ public:
      * @note Constructor initializes all matrices, queues, and state variables to default values
      * Sets up connections, random state, and prepares neuron for operation
      */
-    __device__ Neuron(DeviceQueue<Message, 32> *queues[6], ll coord[3], ull seed, DeviceQueue<Message, 32> *queue_ptr,
-                      DeviceQueue<KFE_STM_Slot, 32> *storage_queue, DeviceQueue<GPUString, 32> *query_queue,
-                      DeviceQueue<KFE_STM_Slot, 32> *result_queue) {
+    __host__ __device__ Neuron(DeviceQueue<Message, 32> *queues[6], ll coord[3], ull seed, DeviceQueue<Message, 32> *queue_ptr,
+                               DeviceQueue<KFE_STM_Slot, 32> *storage_queue, DeviceQueue<GPUString, 32> *query_queue,
+                               DeviceQueue<KFE_STM_Slot, 32> *result_queue) {
         encoder = MessageEncoder();
         decoder = MessageDecoder();
         importance = 0;
@@ -115,8 +115,15 @@ public:
         STM_aggregate_utility = 0.0;
         history_index = 0;
 
+#ifdef __CUDA_ARCH__
+        // Device-specific initialization
         // Initialize random number generator
         curand_init(seed, 0, 0, &rand_state);
+#else
+        // Host-specific initialization
+        // Initialize random number generator for host (using std)
+        srand(seed);
+#endif
 
         // Save local coordinates
         memcpy(local_coord, coord, 3 * sizeof(ll));
@@ -251,8 +258,17 @@ public:
         return fmax(val, 0.0);
     }
 
-    __device__ double randomInRange(double min, double max) {
+    __host__ __device__ double randomInRange(double min, double max) {
+#ifdef __CUDA_ARCH__
         return curand_uniform_double(&rand_state) * (max - min) + min;
+#else
+        // Host implementation using standard random
+        // 简单的线性同余生成器实现
+        static unsigned int seed = 1;
+        seed = seed * 1103515245 + 12345;
+        double normalized = static_cast<double>(seed % 1000000) / 1000000.0;
+        return min + normalized * (max - min);
+#endif
     }
 
     __device__ ull randomULLInRange(ull min, ull max) {
@@ -769,7 +785,7 @@ private:
      *
      * @note Initialized using random number generator to ensure values are within reasonable range
      */
-    __device__ void initializeMatrices() {
+    __host__ __device__ void initializeMatrices() {
         // 初始化P_Matrix为小随机值
         for (int i = 0; i < 256; i++) {
             for (int j = 0; j < 256; j++) {

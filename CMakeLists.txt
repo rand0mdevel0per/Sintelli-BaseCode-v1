@@ -70,7 +70,7 @@ endif ()
 
 add_library(src SHARED
         deviceQueue.cpp
-        matrixMultiplex.cpp
+        matrixMultiplex.cu
         isw.hpp
         cern.cuh
         conv16_res_msg.cuh
@@ -116,6 +116,7 @@ target_compile_options(src
 
 target_compile_definitions(src
         PRIVATE
+        CUTLASS_AVAILABLE
         CROW_STANDALONE_ASIO
         $<$<NOT:$<BOOL:${LZMA_LIBRARY}>>:NO_LZMA_SUPPORT>
 )
@@ -138,9 +139,12 @@ target_include_directories(src
         $<$<BOOL:${LZMA_INCLUDE_DIR}>:${LZMA_INCLUDE_DIR}>
 )
 
-# =============================================================================
-# 🎯 Library Linking Configuration (Unified here with PRIVATE keyword)
-# =============================================================================
+target_compile_definitions(src
+        PRIVATE
+        CUTLASS_AVAILABLE
+        CROW_STANDALONE_ASIO
+        $<$<NOT:$<BOOL:${LZMA_LIBRARY}>>:NO_LZMA_SUPPORT>
+)
 
 target_link_libraries(src
         PRIVATE
