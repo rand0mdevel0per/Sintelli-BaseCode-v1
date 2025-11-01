@@ -67,7 +67,6 @@ struct KFE_STM_Slot {
     
     // 添加getText函数以支持ExternalStorage的语义查询
     std::string getText() const {
-        // 将矩阵数据转换为字符串表示
         std::string text = "KFE_STM_Slot: Ulocal=" + std::to_string(Ulocal) + 
                           ", Rcycles=" + std::to_string(Rcycles) + 
                           ", Icore=" + std::to_string(Icore);

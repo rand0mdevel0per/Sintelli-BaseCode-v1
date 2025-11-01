@@ -35,6 +35,174 @@
 #define ll long long
 #define ull unsigned ll
 
+__device__ double d_ema_baseline = 0.0;
+__constant__ double ema_beta = 0.9;
+
+
+__global__ void aggregateNeuronInputsShared(
+    const half *inputs, // [num_inputs, 256]
+    const half *weights, // [num_inputs]
+    half *output, // [256]
+    int num_inputs
+) {
+    __shared__ half shared_partial[32][256];
+
+    int tid = threadIdx.x;
+    int warp_id = tid / 32;
+    int lane_id = tid % 32;
+
+    // Phase 1: Warp-level reduction (like per-head reduction in Attention)
+    half local_sum = 0;
+    for (int i = warp_id; i < num_inputs; i += blockDim.x / 32) {
+        int idx = i * 256 + lane_id;
+        if (lane_id < 256) {
+            local_sum = __hfma(inputs[idx], weights[i], local_sum);
+        }
+    }
+
+    // Store to shared memory
+    if (lane_id < 256) {
+        shared_partial[warp_id][lane_id] = local_sum;
+    }
+    __syncthreads();
+
+    // Phase 2: Final reduction across warps
+    if (warp_id == 0 && lane_id < 256) {
+        half sum = 0;
+#pragma unroll
+        for (int w = 0; w < 32; ++w) {
+            sum = __hadd(sum, shared_partial[w][lane_id]);
+        }
+        output[lane_id] = sum;
+    }
+}
+
+__global__ void onlineSoftmaxShared(
+    half *attention_scores, // [seq_len, seq_len]
+    int seq_len
+) {
+    __shared__ float shared_max[32];
+    __shared__ float shared_sum[32];
+
+    int row = blockIdx.x;
+    int tid = threadIdx.x;
+
+    // Phase 1: Find max (numerically stable)
+    float local_max = -INFINITY;
+    for (int i = tid; i < seq_len; i += blockDim.x) {
+        float val = __half2float(attention_scores[row * seq_len + i]);
+        local_max = fmaxf(local_max, val);
+    }
+
+    // Warp reduce max
+#pragma unroll
+    for (int offset = 16; offset > 0; offset /= 2) {
+        local_max = fmaxf(local_max, __shfl_down_sync(0xffffffff, local_max, offset));
+    }
+
+    if (tid % 32 == 0) {
+        shared_max[tid / 32] = local_max;
+    }
+    __syncthreads();
+
+    // Final max reduction
+    if (tid < 32) {
+        local_max = shared_max[tid];
+#pragma unroll
+        for (int offset = 16; offset > 0; offset /= 2) {
+            local_max = fmaxf(local_max, __shfl_down_sync(0xffffffff, local_max, offset));
+        }
+        if (tid == 0) shared_max[0] = local_max;
+    }
+    __syncthreads();
+
+    float max_val = shared_max[0];
+
+    // Phase 2: Compute exp and sum
+    float local_sum = 0.0f;
+    for (int i = tid; i < seq_len; i += blockDim.x) {
+        float val = __half2float(attention_scores[row * seq_len + i]);
+        float exp_val = expf(val - max_val);
+        attention_scores[row * seq_len + i] = __float2half(exp_val);
+        local_sum += exp_val;
+    }
+
+    // Warp reduce sum
+#pragma unroll
+    for (int offset = 16; offset > 0; offset /= 2) {
+        local_sum += __shfl_down_sync(0xffffffff, local_sum, offset);
+    }
+
+    if (tid % 32 == 0) {
+        shared_sum[tid / 32] = local_sum;
+    }
+    __syncthreads();
+
+    // Final sum
+    if (tid < 32) {
+        local_sum = shared_sum[tid];
+#pragma unroll
+        for (int offset = 16; offset > 0; offset /= 2) {
+            local_sum += __shfl_down_sync(0xffffffff, local_sum, offset);
+        }
+        if (tid == 0) shared_sum[0] = local_sum;
+    }
+    __syncthreads();
+
+    // Phase 3: Normalize
+    float sum_inv = 1.0f / shared_sum[0];
+    for (int i = tid; i < seq_len; i += blockDim.x) {
+        float val = __half2float(attention_scores[row * seq_len + i]);
+        attention_scores[row * seq_len + i] = __float2half(val * sum_inv);
+    }
+}
+
+template<int TILE_SIZE = 16>
+__global__ void tiledMatMulShared(
+    const double *A, // [M, K]
+    const double *B, // [K, N]
+    double *C, // [M, N]
+    int M, int N, int K
+) {
+    __shared__ double As[TILE_SIZE][TILE_SIZE];
+    __shared__ double Bs[TILE_SIZE][TILE_SIZE];
+
+    int tx = threadIdx.x;
+    int ty = threadIdx.y;
+    int row = blockIdx.y * TILE_SIZE + ty;
+    int col = blockIdx.x * TILE_SIZE + tx;
+
+    double sum = 0;
+
+    // Tile iteration
+    for (int t = 0; t < (K + TILE_SIZE - 1) / TILE_SIZE; ++t) {
+        // coalesced access
+        if (row < M && t * TILE_SIZE + tx < K)
+            As[ty][tx] = A[row * K + t * TILE_SIZE + tx];
+        else
+            As[ty][tx] = 0;
+
+        if (col < N && t * TILE_SIZE + ty < K)
+            Bs[ty][tx] = B[(t * TILE_SIZE + ty) * N + col];
+        else
+            Bs[ty][tx] = 0;
+
+        __syncthreads();
+
+        // Compute on shared memory (fast!)
+#pragma unroll
+        for (int k = 0; k < TILE_SIZE; ++k) {
+            sum += As[ty][k] * Bs[k][tx]; // FMA
+        }
+
+        __syncthreads();
+    }
+
+    if (row < M && col < N) {
+        C[row * N + col] = sum;
+    }
+}
+
 struct NeuronStats {
     bool training;
     double activity;
@@ -90,7 +258,8 @@ public:
      * @note Constructor initializes all matrices, queues, and state variables to default values
      * Sets up connections, random state, and prepares neuron for operation
      */
-    __host__ __device__ Neuron(DeviceQueue<Message, 32> *queues[6], ll coord[3], ull seed, DeviceQueue<Message, 32> *queue_ptr,
+    __host__ __device__ Neuron(DeviceQueue<Message, 32> *queues[6], ll coord[3], ull seed,
+                               DeviceQueue<Message, 32> *queue_ptr,
                                DeviceQueue<KFE_STM_Slot, 32> *storage_queue, DeviceQueue<GPUString, 32> *query_queue,
                                DeviceQueue<KFE_STM_Slot, 32> *result_queue) {
         encoder = MessageEncoder();
@@ -152,9 +321,9 @@ public:
 
     __device__ NeuronData save() {
         NeuronData data{};
-        // 注意：这里需要修改，因为port_in和port_out是DeviceQueue类型
-        // 我们需要遍历队列中的所有元素
-        // 这里简化处理，实际应该正确遍历DeviceQueue
+        // Note: This needs to be modified because port_in and port_out are of type DeviceQueue.
+        // We need to iterate through all elements in the queue.
+        // Simplified here; proper traversal of DeviceQueue should be implemented.
         memcpy(data.port_counts, port_counts, sizeof(port_counts));
 
         memcpy(data.input_conns, input_conns, sizeof(input_conns));
@@ -291,7 +460,7 @@ public:
         return stats;
     }
 
-    __host__ bool inject(NeuronInput inp, int port) {
+    __device__ bool inject(NeuronInput inp, int port) {
         try {
             port_in[port].host_push(inp);
             return true;
@@ -509,19 +678,16 @@ public:
         out_conn = output_conn_count;
     }
 
-    // 设置队列指针的方法
     void setQueuePointer(DeviceQueue<Message, 32> *queue_ptr) {
         queue = queue_ptr;
     }
 
-    // 设置邻居队列指针的方法
     void setNeighbourQueuePointers(DeviceQueue<Message, 32> *queues[6]) {
         for (int i = 0; i < 6; i++) {
             neighbour_queues[i] = queues[i];
         }
     }
 
-    // 重置指针为nullptr（用于序列化）
     void resetPointersForSerialization() {
         queue = nullptr;
         for (int i = 0; i < 6; i++) {
@@ -532,7 +698,6 @@ public:
         kfe_result_queue = nullptr;
     }
 
-    // 获取邻居队列指针（用于验证）
     DeviceQueue<Message, 32> *getNeighbourQueue(int index) const {
         if (index >= 0 && index < 6) {
             return neighbour_queues[index];
@@ -540,43 +705,46 @@ public:
         return nullptr;
     }
 
-    // 获取主队列指针（用于验证）
     DeviceQueue<Message, 32> *getQueue() const {
         return queue;
     }
 
     __device__ void adjust_weights_rl(double delta) {
-        // 更新核心权重矩阵
+        update_count++;
+        const ull t = update_count;
         for (int i = 0; i < 256; i++) {
             for (int j = 0; j < 256; j++) {
-                W_predict[i][j] += delta * P_Matrix[i][j];
-                // 裁剪防止爆炸
+                const double core = P_Matrix[i][j] * Deviation[i][j];
+                const double aux = 0.3 * static_cast<double>(__half2float(PS_aggregate[i][j])) + 0.3 * M_KFE[i][j] + 0.4
+                                   * STM_aggregate_utility;
+                const double product = delta * core * aux;
+                const double scaled = pow(product, 1.0 / 3);
+                const double g = max(min(delta * scaled, 1.0), 0.0);
+
+                m[i][j] = beta1 * m[i][j] + (1 - beta1) * g;
+                v[i][j] = beta2 * v[i][j] + (1 - beta2) * g * g;
+
+                const double m_hat = m[i][j] / (1.0 - pow(beta1, t));
+                const double v_hat = v[i][j] / (1.0 - pow(beta2, t));
+
+                const double update = m_hat / (sqrt(v_hat) + eps);
+
+                W_predict[i][j] += update;
                 W_predict[i][j] = fmax(-2.0, fmin(2.0, W_predict[i][j]));
             }
         }
     }
 
     __device__ void apply_trace_update(double global_score, double learning_rate, double trace) {
-        // 1. 计算局部梯度
         double local_gradient = trace * global_score * activity;
-
-        // 2. 梯度裁剪
         local_gradient = fmax(-1.0, fmin(1.0, local_gradient));
-
-        // 3. 自适应学习率
         double adaptive_lr = learning_rate / (1.0 + cycle_counter * 0.0001) * getLearningRate(3);
-
-        // 4. 更新权重
         for (int i = 0; i < 256; i++) {
             for (int j = 0; j < 256; j++) {
                 W_predict[i][j] += adaptive_lr * local_gradient * P_Matrix[i][j];
-
-                // 权重裁剪
                 W_predict[i][j] = fmax(-2.0, fmin(2.0, W_predict[i][j]));
             }
         }
-
-        // 5. Trace衰减
         trace *= 0.95;
     }
 
@@ -587,8 +755,17 @@ public:
 
     void set_size(ull size) { GRID_SIZE = size; }
 
+    // ===== Adam Optimizer State =====
+    double m[256][256]{};
+    double v[256][256]{};
+    ull update_count;
+    size_t weight_dim;
+    const double beta1 = 0.9;
+    const double beta2 = 0.999;
+    const double eps = 1e-8;
+
 private:
-    // ===== 随机数和基础状态 =====
+    // ===== Random number&basic states =====
     curandStatePhilox4_32_10_t rand_state{};
     double activity;
     ll local_coord[3]{0, 0, 0};
@@ -596,10 +773,10 @@ private:
     ull GRID_SIZE;
     double global_lr = 0.01;
     double lr_schedule[4] = {1.0, 0.5, 0.3, 0.1};
-    // KFE外部存储队列（通过消息队列与主机通信）
-    DeviceQueue<KFE_STM_Slot, 32> *kfe_storage_queue; // 存储请求队列
-    DeviceQueue<GPUString, 32> *kfe_query_queue; // 查询请求队列
-    DeviceQueue<KFE_STM_Slot, 32> *kfe_result_queue; // 查询结果队列
+    // KFE External Storage queue pointers;Communication between device&host
+    DeviceQueue<KFE_STM_Slot, 32> *kfe_storage_queue; // storage requests queue
+    DeviceQueue<GPUString, 32> *kfe_query_queue; // storage query queue
+    DeviceQueue<KFE_STM_Slot, 32> *kfe_result_queue; // query result queue
     GPUVector<ExtKFE_Slot> ext_kfe_slots;
     GPUMutex ext_kfe_mutex, kfe_mutex;
 
@@ -609,16 +786,16 @@ private:
     // These slots store compressed knowledge fragments for rapid access
     KFE_STM_Slot kfe_local[16]{};
 
-    // ===== 消息队列系统 =====
+    // ===== Message queue system =====
     DeviceQueue<Message, 32> *queue{};
-    DeviceQueue<Message, 32> *neighbour_queues[6]{}; // 6个方向的邻居
+    DeviceQueue<Message, 32> *neighbour_queues[6]{};
 
     // ===== Port System (4 Logical Ports) =====
     // Each neuron has 4 logical ports for input/output operations
-    // This allows for multi-channel communication between neurons
+    // This allows for multichannel communication between neurons
     DeviceQueue<NeuronInput, 1024> port_in[4]{};
     DeviceQueue<NeuronInput, 1024> port_out[4]{};
-    ll port_counts[4]{}; // 每个端口的连接数
+    ll port_counts[4]{};
 
     // ===== Connection Information =====
     // Stores connection details for input and output connections
@@ -631,8 +808,8 @@ private:
     // ===== Port Transformation Matrices =====
     // Input/output transformation matrices for each of the 4 ports
     // Used for feature transformation and mapping between ports
-    double input_multiplex_array[256][256][4]{}; // 输入端口变换
-    double output_multiplex_array[256][256][4]{}; // 输出端口变换
+    double input_multiplex_array[256][256][4]{};
+    double output_multiplex_array[256][256][4]{};
 
     // ===== GEMM/DRC Inference State =====
     // Core matrices for GEMM (General Matrix Multiply) and DRC (Dynamic Recalibration Correction) inference
@@ -642,15 +819,15 @@ private:
     // M_KFE: KFE knowledge context
     // Deviation: Prediction error
     // PS_aggregate: Neighbor consensus
-    double P_Matrix[256][256]{}; // 意图矩阵(当前状态)
-    double P_stable[256][256]{}; // 稳定预测(认知基线)
-    double W_predict[256][256]{}; // 自回归权重
-    double M_KFE[256][256]{}; // KFE知识上下文
-    double Deviation[256][256]{}; // 预测误差
-    half PS_aggregate[256][256]{}; // 邻居共识
+    double P_Matrix[256][256]{};
+    double P_stable[256][256]{};
+    double W_predict[256][256]{};
+    double Deviation[256][256]{};
+    half PS_aggregate[256][256]{};
+    double M_KFE[256][256]{};
     double h_state[256];
-    half time_decay[256]; // 每个通道的衰减率
-    half time_first[256]; // 时间优先度
+    half time_decay[256];
+    half time_first[256];
 
     // ===== Gating and DRC History =====
     // Variables for controlling inference execution and maintaining history
@@ -662,13 +839,13 @@ private:
     int cycle_counter;
     double core_vulnerability;
     double STM_aggregate_utility;
-    half P_history[5][256][256]{}; // 最近5轮历史
+    half P_history[5][256][256]{};
     int history_index;
     MessageEncoder encoder{};
     MessageDecoder decoder{};
     double importance;
 
-    // ===== XOR相关(备用) =====
+    // ===== XOR array(deprecated) =====
     /*  __DEPRECATED__
     bool core_xor_array[2048][2048]{};
     double cor_xor_clip_array[2048][2048]{};
@@ -678,19 +855,17 @@ private:
     double learn;
 
     __device__ double getLearningRate(int update_type) {
-        // 根据训练步数衰减
         double decay = 1.0 / (1.0 + cycle_counter * 0.0001);
         return global_lr * lr_schedule[update_type] * decay;
     }
 
-    // ===== 添加卷积相关成员 =====
-    ConvKernel input_conv_kernels[4][8]{}; // 每个端口8个卷积核
-    ConvKernel output_conv_kernels[4][8]{}; // 输出端口卷积核
-    double conv_feature_maps[4][8][32][32]{}; // 特征图(256/8=32)
+    // ===== Conv states =====
+    ConvKernel input_conv_kernels[4][8]{};
+    ConvKernel output_conv_kernels[4][8]{};
+    double conv_feature_maps[4][8][32][32]{};
 
     __device__ void sendAdaptiveMessage(const double data[256][256],
                                         ll to_coord[3]) {
-        // 1. 决定压缩模式
         CompressionMode mode = CompressionDecider::decide(
             activity,
             core_vulnerability,
@@ -699,7 +874,6 @@ private:
             encoder.getAvgError()
         );
 
-        // 2. 根据模式编码
         if (mode == MODE_FULL) {
             FullMessage msg{};
             memcpy(msg.to_coord, to_coord, sizeof(ll) * 3);
@@ -755,20 +929,18 @@ private:
                                            void *msg_ptr,
                                            double output[256][256]) {
         if (mode == MODE_FULL) {
-            FullMessage *msg = (FullMessage *) msg_ptr;
+            const auto msg = static_cast<FullMessage *>(msg_ptr);
             decoder.decodeFull(*msg, output);
-            // 记得释放内存块
             global_memory_pool.release(msg->pool_block_id);
         } else if (mode == MODE_RESIDUAL) {
-            ResidualMessage *msg = (ResidualMessage *) msg_ptr;
+            const auto *msg = static_cast<ResidualMessage *>(msg_ptr);
             decoder.decodeResidual(*msg, output);
         } else if (mode == MODE_CONV_ONLY) {
-            ConvMessage *msg = (ConvMessage *) msg_ptr;
+            const auto *msg = static_cast<ConvMessage *>(msg_ptr);
             decoder.decodeConv(*msg, output);
         }
     }
 
-    // ===== 初始化函数 =====
     /**
      * @brief Initialize neuron matrix state
      *
@@ -786,7 +958,6 @@ private:
      * @note Initialized using random number generator to ensure values are within reasonable range
      */
     __host__ __device__ void initializeMatrices() {
-        // 初始化P_Matrix为小随机值
         for (int i = 0; i < 256; i++) {
             for (int j = 0; j < 256; j++) {
                 P_Matrix[i][j] = randomInRange(-0.1, 0.1);
@@ -797,8 +968,6 @@ private:
                 PS_aggregate[i][j] = 0.0;
             }
         }
-
-        // 初始化端口变换矩阵(初始为单位阵的变体)
         for (int p = 0; p < 4; p++) {
             for (int i = 0; i < 256; i++) {
                 for (int j = 0; j < 256; j++) {
@@ -812,8 +981,6 @@ private:
                 }
             }
         }
-
-        // 初始化DRC历史
         for (int h = 0; h < 5; h++) {
             for (int i = 0; i < 256; i++) {
                 for (int j = 0; j < 256; j++) {
@@ -823,7 +990,6 @@ private:
         }
     }
 
-    // ===== 卷积操作 =====
     /**
      * @brief Perform 8×8 convolution operation (stride=8, non-overlapping)
      *
@@ -839,9 +1005,9 @@ private:
      *
      * @note Ensure input and convolution kernel memory alignment for performance optimization
      */
-    __device__ void conv2d_8x8(const double input[256][256],
-                               const ConvKernel &kernel,
-                               double output[32][32]) {
+    static __device__ void conv2d_8x8(const double input[256][256],
+                                      const ConvKernel &kernel,
+                                      double output[32][32]) {
         // 256×256 → 32×32 (stride=8, no padding)
         for (int i = 0; i < 32; i++) {
             for (int j = 0; j < 32; j++) {
@@ -877,9 +1043,9 @@ private:
      *
      * @note Deconvolution is the inverse operation of convolution, used for feature reconstruction
      */
-    __device__ void deconv2d_8x8(const double input[32][32],
-                                 const ConvKernel &kernel,
-                                 double output[256][256]) {
+    static __device__ void deconv2d_8x8(const double input[32][32],
+                                        const ConvKernel &kernel,
+                                        double output[256][256]) {
         // 32×32 → 256×256
         memset(output, 0, sizeof(double) * 256 * 256);
 
@@ -922,7 +1088,7 @@ private:
     }
 
     // ===== 特征聚合(替代简单的matmul) =====
-    __device__ void aggregateFeatures(int port, double output[256][256]) {
+    __device__ void aggregateFeatures(int port, double output[256][256]) const {
         // 将8个特征图反卷积并加权融合
         double temp_outputs[8][256][256];
 
@@ -931,8 +1097,6 @@ private:
                          input_conv_kernels[port][k],
                          temp_outputs[k]);
         }
-
-        // 加权融合
         memset(output, 0, sizeof(double) * 256 * 256);
         for (int i = 0; i < 256; i++) {
             for (int j = 0; j < 256; j++) {
@@ -943,31 +1107,23 @@ private:
         }
     }
 
-    // ===== 卷积核更新(反向传播) =====
     __device__ void updateConvKernels(int port) {
         double learning_rate = getLearningRate(1);
 
-        // 计算梯度(简化版,实际应该是完整的BP)
         for (int k = 0; k < 8; k++) {
             for (int ki = 0; ki < 8; ki++) {
                 for (int kj = 0; kj < 8; kj++) {
-                    // 使用特征图和误差计算梯度
                     double grad = 0.0;
                     for (int i = 0; i < 32; i++) {
                         for (int j = 0; j < 32; j++) {
-                            // 简化梯度:特征值×偏差
                             grad += conv_feature_maps[port][k][i][j] *
                                     Deviation[i * 8 + ki][j * 8 + kj];
                         }
                     }
-
-                    // 更新权重
                     input_conv_kernels[port][k].kernel[ki][kj] -=
                             learning_rate * grad / (32.0 * 32.0);
                 }
             }
-
-            // 更新bias
             double bias_grad = 0.0;
             for (int i = 0; i < 32; i++) {
                 for (int j = 0; j < 32; j++) {
@@ -997,7 +1153,6 @@ public:
      */
     __device__ void processMessage(const Message &msg) {
         if (msg.type == NEURON_DATA) {
-            // 数据消息:路由或接收
             if (msg.to_coord[0] == local_coord[0] &&
                 msg.to_coord[1] == local_coord[1] &&
                 msg.to_coord[2] == local_coord[2]) {
@@ -1006,14 +1161,12 @@ public:
                 route(msg);
             }
         } else if (msg.type == FIND_NEURON) {
-            // 连接请求:转发或回复
             if (msg.remains > 1) {
                 Message msg_forward = msg;
                 msg_forward.remains--;
                 sendMessage(msg_forward, randomULLInRange(0, 6));
             }
 
-            // 回复连接请求
             Message msg_reply{};
             memcpy(msg_reply.last_proxy_coord, local_coord, 3 * sizeof(ll));
             memcpy(msg_reply.from_coord, local_coord, 3 * sizeof(ll));
@@ -1022,7 +1175,6 @@ public:
             msg_reply.type = REPLY_NEURON_FIND;
             route(msg_reply);
 
-            // 添加为输入连接(分配到负载最小的端口)
             if (input_conn_count < 2048) {
                 ll min_port = port_counts[0];
                 int min_port_index = 0;
@@ -1040,11 +1192,9 @@ public:
                 input_conn_count++;
             }
         } else if (msg.type == REPLY_NEURON_FIND) {
-            // 连接回复:路由或接受
             if (msg.to_coord[0] == local_coord[0] &&
                 msg.to_coord[1] == local_coord[1] &&
                 msg.to_coord[2] == local_coord[2]) {
-                // 添加为输出连接
                 if (output_conn_count < 2048) {
                     ll min_port = port_counts[0];
                     int min_port_index = 0;
@@ -1083,27 +1233,27 @@ private:
      */
     __device__ void route(Message msg) {
         if (msg.to_coord[0] > local_coord[0]) {
-            sendMessage(msg, 0); // +X方向
+            sendMessage(msg, 0); // +X
         } else if (msg.to_coord[0] < local_coord[0]) {
-            sendMessage(msg, 1); // -X方向
+            sendMessage(msg, 1); // -X
         } else if (msg.to_coord[1] > local_coord[1]) {
-            sendMessage(msg, 2); // +Y方向
+            sendMessage(msg, 2); // +Y
         } else if (msg.to_coord[1] < local_coord[1]) {
-            sendMessage(msg, 3); // -Y方向
+            sendMessage(msg, 3); // -Y
         } else if (msg.to_coord[2] > local_coord[2]) {
-            sendMessage(msg, 4); // +Z方向
+            sendMessage(msg, 4); // +Z
         } else if (msg.to_coord[2] < local_coord[2]) {
-            sendMessage(msg, 5); // -Z方向
+            sendMessage(msg, 5); // -Z
         }
     }
 
-    __device__ void sendMessage(const Message &msg, int direction) {
+    __device__ void sendMessage(const Message &msg, const int direction) const {
         if (direction >= 0 && direction < 6 && neighbour_queues[direction]) {
             neighbour_queues[direction]->push(msg);
         }
     }
 
-    // ===== 接收消息并分配到端口 =====
+    // ===== Receive messages&send to port =====
     __device__ void receiveMessages(Message msg) {
         for (int i = 0; i < input_conn_count; i++) {
             if (input_conns[i].coord[0] == msg.from_coord[0] &&
@@ -1112,7 +1262,6 @@ private:
                 NeuronInput cache_inp{};
                 cache_inp.activity = msg.activity;
                 cache_inp.weight = msg.weight;
-                double value[256][256]{};
                 switch (msg.compression_mode) {
                     case MODE_FULL:
                         receiveAdaptiveMessage(msg.compression_mode, &msg.adaptive_msg.full_msg, cache_inp.array);
@@ -1134,23 +1283,19 @@ private:
     }
 
     __device__ void addPositionalEncoding() {
-        // pos = 神经元在3D空间的"序列位置"
         ll pos = local_coord[0] * GRID_SIZE * GRID_SIZE +
                  local_coord[1] * GRID_SIZE +
                  local_coord[2];
 
         for (int i = 0; i < 256; i++) {
             for (int j = 0; j < 256; j++) {
-                int d = i * 256 + j; // 维度索引
+                int d = i * 256 + j;
 
-                // Sinusoidal位置编码
                 double freq = 1.0 / pow(10000.0, 2.0 * d / 65536.0);
 
                 if (d % 2 == 0) {
-                    // 偶数维度用sin
                     P_Matrix[i][j] += 0.1 * sin(pos * freq);
                 } else {
-                    // 奇数维度用cos
                     P_Matrix[i][j] += 0.1 * cos(pos * freq);
                 }
             }
@@ -1178,41 +1323,43 @@ private:
 
         NeuronInput curr_inp;
         port_in[port].pop(curr_inp);
-
-        // === 阶段1: 聚合所有端口的邻居输入 ===
         double weight_sum = 0.0;
-
-        // 重置聚合矩阵
         for (int i = 0; i < 256; i++) {
             for (int j = 0; j < 256; j++) {
                 PS_aggregate[i][j] = 0.0;
             }
         }
-
-        // 从4个端口收集并加权平均
+        selectiveSSM();
         for (int p = 0; p < 4; p++) {
             if (!port_in[p].empty()) {
                 NeuronInput temp_inp = port_in[p].front();
 
-                // 先通过input_multiplex_array变换输入
                 double transformed_input[256][256];
+                /*
                 matmul_double(&temp_inp.array[0][0], &input_multiplex_array[0][0][p],
                               &transformed_input[0][0]);
+                */
+                dim3 block(16, 16);
+                dim3 grid((256 + 15) / 16, (256 + 15) / 16);
 
-                // 提取卷积特征
+                tiledMatMulShared<16><<<grid, block>>>(
+                    &temp_inp.array[0][0], &input_multiplex_array[0][0][p], &transformed_input[0][0],
+                    256, 256, 256
+                );
+
+
                 extractConvFeatures(p, transformed_input);
 
                 double score = 0.0;
                 for (int i = 0; i < 256; i++) {
                     for (int j = 0; j < 256; j++) {
-                        // Q = P_Matrix (当前状态)
-                        // K = all_inputs[k] (输入)
+                        // Q = P_Matrix[i][j]
+                        // K = all_inputs[k]
                         score += P_Matrix[i][j] * transformed_input[i][j];
                     }
                 }
                 score /= sqrt(256.0 * 256.0);
 
-                // 聚合特征图
                 double aggregated[256][256];
                 aggregateFeatures(p, aggregated);
 
@@ -1221,15 +1368,12 @@ private:
 
                 for (int i = 0; i < 256; i++) {
                     double wkv = 0.0;
-                    double state = h_state[i]; // 复用SSM的状态
+                    double state = h_state[i];
                     for (int j = 0; j < 256; j++) {
                         double k = PS_aggregate[i][j]; // key
                         double v = PS_aggregate[i][j]; // value
-
-                        // 时间衰减
                         double w = -exp(time_decay[i]);
-
-                        // WKV计算
+                        //wkv compute
                         wkv += exp(__half2float(time_first[i]) + k) * v;
                         state = state * exp(w) + exp(k) * v;
                         PS_aggregate[i][j] += transformed_input[i][j] * w * aggregated[i][j] * score + wkv / (
@@ -1239,7 +1383,7 @@ private:
             }
         }
 
-        // 归一化
+        // normalize
         if (weight_sum > 1e-6) {
             for (int i = 0; i < 256; i++) {
                 for (int j = 0; j < 256; j++) {
@@ -1248,27 +1392,18 @@ private:
             }
         }
 
-        // 计算预测误差(意外性)
+        // deviation
         for (int i = 0; i < 256; i++) {
             for (int j = 0; j < 256; j++) {
                 Deviation[i][j] = __half2float(PS_aggregate[i][j]) - P_stable[i][j];
             }
         }
-
-        selectiveSSM();
-
-        // === 阶段2: KFE注意力计算 ===
         STM_aggregate_utility = computeKFEAttention();
 
-        // === 阶段3: 门控判断 ===
         bool trigger_gemm = false;
-
-        // 条件1: 周期心跳
         if (cycle_counter % 16 == 0) {
             trigger_gemm = true;
         }
-
-        // 条件2: 外部高需求(输入变化大)
         double deviation_norm = 0.0;
         for (int i = 0; i < 256; i++) {
             for (int j = 0; j < 256; j++) {
@@ -1279,13 +1414,9 @@ private:
         if (deviation_norm > 0.5) {
             trigger_gemm = true;
         }
-
-        // 条件3: 内部危机
         if (core_vulnerability > 0.7) {
             trigger_gemm = true;
         }
-
-        // 条件4: 内部注意力
         if (STM_aggregate_utility > 0.6) {
             trigger_gemm = true;
         }
@@ -1297,7 +1428,6 @@ private:
         }
 
 
-        // === 阶段4: 广播输出 ===
         broadcastOutput();
 
         for (int p = 0; p < 4; p++) {
@@ -1337,7 +1467,6 @@ private:
         for (int k = 0; k < 16; k++) {
             if (kfe_local[k].Icore < 0.01) continue;
 
-            // KFE块与Deviation的点积(相关性)
             double dot_product = 0.0;
             for (int i = 0; i < 256; i++) {
                 for (int j = 0; j < 256; j++) {
@@ -1349,7 +1478,6 @@ private:
             isum += kfe_local[k].Icore;
             vsum += kfe_local[k].V;
 
-            // Sigmoid激活并累加到M_KFE
             double attention_weight = 1.0 / (1.0 + exp(-dot_product));
             double weighted_attention = attention_weight * kfe_local[k].Icore;
 
@@ -1362,7 +1490,6 @@ private:
             utility += weighted_attention;
 
             kfe_mutex.lock();
-            // 更新KFE槽位统计
             kfe_local[k].Ulocal += 0.01 * (attention_weight - kfe_local[k].Ulocal);
             kfe_local[k].Icore += 0.01 * (0.5 - kfe_local[k].Icore);
             kfe_local[k].V -= 0.01 * (1.0 - kfe_local[k].V);
@@ -1384,25 +1511,25 @@ private:
                 }
             }
             KFE_STM_Slot ext_kfe_pulled{};
-            // 通过队列查询外部KFE
+            // query external KFE through queue
             if (kfe_query_queue && kfe_result_queue) {
                 kfe_query_queue->push(ext_kfe_slots[max_index].hash.data());
-                // 尝试获取查询结果
-                if (kfe_result_queue->pop(ext_kfe_pulled)) {
-                    // 成功获取到外部KFE槽位
-                } else {
-                    // 如果获取失败，使用默认值
+                for (int wait_cycle = 0; wait_cycle < 100; wait_cycle++) {
+                    if (kfe_result_queue->size() > 0) {
+                        break;
+                    }
+                    __nanosleep(100);
+                }
+                if (!kfe_result_queue->pop(ext_kfe_pulled)) {
                     ext_kfe_pulled = {};
                 }
             }
-            // KFE块与Deviation的点积(相关性)
             double dot_product = 0.0;
             for (int i = 0; i < 256; i++) {
                 for (int j = 0; j < 256; j++) {
                     dot_product += ext_kfe_pulled.Vmem[i][j] * Deviation[i][j];
                 }
             }
-            // Sigmoid激活并累加到M_KFE
             double attention_weight = 1.0 / (1.0 + exp(-dot_product));
             double weighted_attention = attention_weight * ext_kfe_pulled.Icore;
 
@@ -1423,30 +1550,25 @@ private:
     }
 
     __device__ void selectiveSSM() {
-        // 1. 输入投影
-        double B[256], C[256]; // 输入门和输出门
+        double B[256], C[256];
 
         for (int i = 0; i < 256; i++) {
-            // 根据输入决定如何更新状态
             double input_i = 0.0;
             for (int j = 0; j < 256; j++) {
                 input_i += __half2float(PS_aggregate[i][j]);
             }
             input_i /= 256.0;
 
-            // 选择性门控 (类似LSTM的forget gate)
-            B[i] = gelu(input_i); // 记忆多少输入
-            C[i] = gelu(-input_i); // 输出多少状态
+            B[i] = gelu(input_i);
+            C[i] = gelu(-input_i);
         }
 
-        // 2. 状态更新 (线性递归)
         for (int i = 0; i < 256; i++) {
             // Δ = B × input + decay × h_old
             double delta = B[i] * __half2float(PS_aggregate[i][0]);
             h_state[i] = 0.9 * h_state[i] + delta;
         }
 
-        // 3. 输出投影
         for (int i = 0; i < 256; i++) {
             for (int j = 0; j < 256; j++) {
                 P_Matrix[i][j] += C[i] * h_state[i];
@@ -1455,22 +1577,17 @@ private:
     }
 
     __device__ bool shouldUseFullAttention() {
-        // 重要任务用Transformer的完整注意力
-        // 一般任务用RWKV的线性注意力
         return (core_vulnerability > 0.7) ||
                (STM_aggregate_utility > 0.6);
     }
 
     void predictNoise(double input[256][256], double output[256][256]) {
-        // 多尺度特征提取层
         double scale1[256][256]; // 细节特征
         double scale2[256][256]; // 中等尺度特征
         double scale3[256][256]; // 粗糙特征
 
-        // 第一层：提取边缘和细节特征 (3x3卷积)
         for (int i = 1; i < 255; i++) {
             for (int j = 1; j < 255; j++) {
-                // Sobel边缘检测核
                 double gx = -input[i - 1][j - 1] - 2 * input[i][j - 1] - input[i + 1][j - 1] +
                             input[i - 1][j + 1] + 2 * input[i][j + 1] + input[i + 1][j + 1];
                 double gy = -input[i - 1][j - 1] - 2 * input[i - 1][j] - input[i - 1][j + 1] +
@@ -1479,11 +1596,9 @@ private:
             }
         }
 
-        // 第二层：提取中等尺度特征 (5x5高斯平滑)
         for (int i = 2; i < 254; i++) {
             for (int j = 2; j < 254; j++) {
                 double sum = 0.0;
-                // 5x5高斯核近似
                 sum += 1 * input[i - 2][j - 2] + 4 * input[i - 2][j - 1] + 6 * input[i - 2][j] + 4 * input[i - 2][j + 1]
                         + 1 * input[i - 2][j + 2];
                 sum += 4 * input[i - 1][j - 2] + 16 * input[i - 1][j - 1] + 24 * input[i - 1][j] + 16 * input[i - 1][
@@ -1494,11 +1609,10 @@ private:
                     j + 1] + 4 * input[i + 1][j + 2];
                 sum += 1 * input[i + 2][j - 2] + 4 * input[i + 2][j - 1] + 6 * input[i + 2][j] + 4 * input[i + 2][j + 1]
                         + 1 * input[i + 2][j + 2];
-                scale2[i][j] = sum / 256.0; // 归一化
+                scale2[i][j] = sum / 256.0;
             }
         }
 
-        // 第三层：提取粗糙特征 (9x9平均池化)
         for (int i = 4; i < 252; i++) {
             for (int j = 4; j < 252; j++) {
                 double sum = 0.0;
@@ -1511,7 +1625,6 @@ private:
             }
         }
 
-        // 边界填充
         for (int i = 0; i < 256; i++) {
             for (int j = 0; j < 256; j++) {
                 if (i < 1 || i >= 255 || j < 1 || j >= 255) {
@@ -1526,23 +1639,19 @@ private:
             }
         }
 
-        // 特征融合层
         for (int i = 4; i < 252; i++) {
             for (int j = 4; j < 252; j++) {
-                // 加权融合多尺度特征
                 double fused = 0.4 * scale1[i][j] + 0.3 * scale2[i][j] + 0.3 * scale3[i][j];
 
-                // 使用Swish激活函数: x * sigmoid(x)
+                // swish:x * sigmoid(x)
                 double sigmoid_val = 1.0 / (1.0 + exp(-fused));
                 output[i][j] = fused * sigmoid_val;
             }
         }
 
-        // 注意力机制：突出重要的噪声区域
         double attention_map[256][256];
         double mean_val = 0.0;
 
-        // 计算平均值
         for (int i = 4; i < 252; i++) {
             for (int j = 4; j < 252; j++) {
                 mean_val += fabs(output[i][j]);
@@ -1550,26 +1659,21 @@ private:
         }
         mean_val /= (248 * 248);
 
-        // 生成注意力图
         for (int i = 4; i < 252; i++) {
             for (int j = 4; j < 252; j++) {
-                // 对比度增强
                 double diff = fabs(output[i][j]) - mean_val;
-                attention_map[i][j] = 1.0 + tanh(diff * 2.0); // 放大差异
+                attention_map[i][j] = 1.0 + tanh(diff * 2.0);
             }
         }
 
-        // 应用注意力权重
         for (int i = 4; i < 252; i++) {
             for (int j = 4; j < 252; j++) {
                 output[i][j] *= attention_map[i][j];
             }
         }
-
-        // 残差连接：保留原始输入信息
         for (int i = 4; i < 252; i++) {
             for (int j = 4; j < 252; j++) {
-                output[i][j] += 0.1 * input[i][j]; // 弱连接
+                output[i][j] += 0.1 * input[i][j]; // soft connect
             }
         }
 
@@ -1577,7 +1681,6 @@ private:
         double temp[256][256];
         for (int i = 5; i < 251; i++) {
             for (int j = 5; j < 251; j++) {
-                // 3x3平均滤波
                 double sum = 0.0;
                 for (int di = -1; di <= 1; di++) {
                     for (int dj = -1; dj <= 1; dj++) {
@@ -1650,7 +1753,16 @@ private:
         }
 
         // P_Matrix × W_predict
+        /*
         matmul_double(&P_Matrix[0][0], &W_predict[0][0], &temp_product[0][0]);
+        */
+        dim3 block(16, 16);
+        dim3 grid((256 + 15) / 16, (256 + 15) / 16);
+
+        tiledMatMulShared<16><<<grid, block>>>(
+            &P_Matrix[0][0], &W_predict[0][0], &temp_product[0][0],
+            256, 256, 256
+        );
 
         // Add KFE context and apply GELU activation
         for (int i = 0; i < 256; i++) {
@@ -1686,37 +1798,39 @@ private:
             double P_new[256][256];
 
             for (int i = 0; i < 256; i++) {
-                for (int j = 0; j < 256; j++) {
-                    // 1. 基础修正项
-                    double V_corr = (T_fixed[i][j] - P_current[i][j]) * eta_base;
+                {
+                    for (int j = 0; j < 256; j++) {
+                        // 1. 基础修正项
+                        double V_corr = (T_fixed[i][j] - P_current[i][j]) * eta_base;
 
-                    // 2. 局部注意力调制
-                    double local_feature = 0.0;
-                    for (int p = 0; p < 4; p++) {
-                        if (!port_in[p].empty()) {
-                            NeuronInput temp = port_in[p].front();
-                            local_feature += temp.array[i][j];
+                        // 2. 局部注意力调制
+                        double local_feature = 0.0;
+                        for (int p = 0; p < 4; p++) {
+                            if (!port_in[p].empty()) {
+                                NeuronInput temp = port_in[p].front();
+                                local_feature += temp.array[i][j];
+                            }
                         }
-                    }
-                    local_feature /= 4.0;
+                        local_feature /= 4.0;
 
-                    double attn_weight = 1.0 / (1.0 + exp(-(local_feature * P_current[i][j])));
-                    double M_attn = attn_weight * V_corr;
+                        double attn_weight = 1.0 / (1.0 + exp(-(local_feature * P_current[i][j])));
+                        double M_attn = attn_weight * V_corr;
 
-                    // 3. 历史动量项
-                    double V_hist = 0.0;
-                    if (iter > 0) {
-                        for (int h = 1; h <= min(iter, 3); h++) {
-                            int hist_idx = (history_index - h + 5) % 5;
-                            int prev_idx = (hist_idx - 1 + 5) % 5;
-                            double delta = P_history[hist_idx][i][j] -
-                                           P_history[prev_idx][i][j];
-                            V_hist += pow(lambda, h) * delta;
+                        // 3. 历史动量项
+                        double V_hist = 0.0;
+                        if (iter > 0) {
+                            for (int h = 1; h <= min(iter, 3); h++) {
+                                int hist_idx = (history_index - h + 5) % 5;
+                                int prev_idx = (hist_idx - 1 + 5) % 5;
+                                double delta = P_history[hist_idx][i][j] -
+                                               P_history[prev_idx][i][j];
+                                V_hist += pow(lambda, h) * delta;
+                            }
                         }
-                    }
 
-                    // 组合修正
-                    P_new[i][j] = P_current[i][j] + V_corr + M_attn + V_hist;
+                        // 组合修正
+                        P_new[i][j] = P_current[i][j] + V_corr + M_attn + V_hist;
+                    }
                 }
             }
 
@@ -1838,20 +1952,10 @@ private:
         }
     }
 
-    // 在Neuron类中
-    __device__ double computeImportance() {
+    __device__ double computeImportance() const {
         double importance = 0.0;
-
-        // 因素1: 核心脆弱性(40%权重)
-        // 系统不稳定时,消息更重要
         importance += core_vulnerability * 0.4;
-
-        // 因素2: 活跃度(30%权重)
-        // 高活跃神经元的输出更重要
         importance += activity * 0.3;
-
-        // 因素3: 预测误差(20%权重)
-        // 误差大说明有重要信息
         double deviation_norm = 0.0;
         for (int i = 0; i < 256; i += 16) {
             for (int j = 0; j < 256; j += 16) {
@@ -1860,16 +1964,12 @@ private:
         }
         deviation_norm = sqrt(deviation_norm / 256.0);
         importance += fmin(deviation_norm, 1.0) * 0.2;
-
-        // 因素4: 连接数(10%权重)
-        // 连接多的神经元是枢纽,消息重要
-        double conn_ratio = (double) output_conn_count / 2048.0;
+        const double conn_ratio = static_cast<double>(output_conn_count) / 2048.0;
         importance += conn_ratio * 0.1;
 
         return fmin(importance, 1.0);
     }
 
-    // ===== 广播输出 =====
     __device__ void broadcastOutput() {
         for (int out_idx = 0; out_idx < output_conn_count; out_idx++) {
             Message out_msg;
@@ -1879,10 +1979,17 @@ private:
 
             int port = output_conns[out_idx].port;
 
-            // 通过output_multiplex_array变换输出
             double output_temp[256][256];
+            /*
             matmul_double(&P_Matrix[0][0], &output_multiplex_array[0][0][port],
                           &output_temp[0][0]);
+            */
+            dim3 block(16, 16);
+            dim3 grid((256 + 15) / 16, (256 + 15) / 16);
+            tiledMatMulShared<16><<<grid, block>>>(
+                &P_Matrix[0][0], &W_predict[0][0], &output_temp[0][0],
+                256, 256, 256
+            );
 
             if (computeImportance() > 0.7 && activity > 0.3 && core_vulnerability > 0.3) {
                 out_msg.compression_mode = MODE_FULL;
@@ -2255,38 +2362,28 @@ __global__ void apply_trace_to_neurons(
 ) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= count) return;
-
     if (trace[tid] > 0.01) {
         double activity = neurons[tid].get_activity();
-
         // Policy Gradient: ∇J = trace × (R - baseline)
-        double baseline = 0.5; // 可以用移动平均
-        double advantage = global_score - baseline;
-
-        // 最终梯度
+        double advantage = global_score - d_ema_baseline;
         double gradient = trace[tid] * advantage * activity;
-
-        // 自适应学习率
         double learning_rate = 0.001 / (1.0 + neurons[tid].getcs() * 0.0001);
-
-        // 更新权重
         neurons[tid].adjust_weights_rl(gradient * learning_rate);
-
         neurons[tid].set_noise(1 - trace[tid]);
-
-        // Trace衰减
         trace[tid] *= 0.95;
     }
 }
 
-// CUDA内核函数实现
+__global__ void update_ema_baseline(double global_score) {
+    if (threadIdx.x == 0 && blockIdx.x == 0) {
+        d_ema_baseline = ema_beta * d_ema_baseline + (1 - ema_beta) * global_score;
+    }
+}
 
 static __global__ void injectNeuronKernel(Neuron *neurons, NeuronInput input, int neuron_index, int port) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (idx == 0) {
-        // 只在第一个线程中执行
-
         neurons[neuron_index].inject(input, port);
     }
 }
@@ -2296,8 +2393,6 @@ static __global__ void saveNeuronKernel(Neuron *neurons, NeuronData *data, int n
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (idx == 0) {
-        // 只在第一个线程中执行
-
         *data = neurons[neuron_index].save();
     }
 }
@@ -2307,8 +2402,6 @@ static __global__ void loadNeuronKernel(Neuron *neurons, NeuronData data, int ne
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (idx == 0) {
-        // 只在第一个线程中执行
-
         neurons[neuron_index].load(data);
     }
 }
@@ -2318,8 +2411,6 @@ static __global__ void updateNeuronKernel(Neuron *neurons, int neuron_index) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (idx == 0) {
-        // 只在第一个线程中执行
-
         neurons[neuron_index].step();
     }
 }
@@ -2329,8 +2420,6 @@ static __global__ void processMessageKernel(Neuron *neurons, Message msg, int ne
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (idx == 0) {
-        // 只在第一个线程中执行
-
         neurons[neuron_index].processMessage(msg);
     }
 }
@@ -2340,8 +2429,6 @@ static __global__ void getNeuronStatsKernel(Neuron *neurons, NeuronStats *stats,
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (idx == 0) {
-        // 只在第一个线程中执行
-
         *stats = neurons[neuron_index].get_stats();
     }
 }
@@ -2351,8 +2438,6 @@ static __global__ void setNeuronNoiseKernel(Neuron *neurons, double noise, int n
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (idx == 0) {
-        // 只在第一个线程中执行
-
         neurons[neuron_index].set_noise(noise);
     }
 }
@@ -2362,8 +2447,6 @@ static __global__ void setNeuronLearnRateKernel(Neuron *neurons, double learn_ra
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (idx == 0) {
-        // 只在第一个线程中执行
-
         neurons[neuron_index].set_learn_rt(learn_rate);
     }
 }

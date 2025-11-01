@@ -17,6 +17,7 @@
 #include "isw.hpp"
 #include "semantic_query_engine.h"
 #include "structs.h"  // 包含NeuronInput定义
+#include "hasher.h"
 
 // 知识库条目结构
 struct KnowledgeEntry {
@@ -35,7 +36,8 @@ struct KnowledgeEntry {
     // 添加hash函数以支持ExternalStorage
     std::string hash() const {
         // 简单的hash实现，可以使用title和content的组合
-        return std::to_string(std::hash<std::string>{}(title + content));
+        // return std::to_string(std::hash<std::string>{}(title + content));
+        return sha256_hash<KnowledgeEntry>(*this);
     }
     
     // 添加getText函数以支持ExternalStorage的语义查询

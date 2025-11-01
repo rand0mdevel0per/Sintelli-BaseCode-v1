@@ -28,7 +28,7 @@ public:
                     const std::string &special_tokens_path);
 
     // 获取文本的语义向量
-    bool getTextEmbedding(const std::string &text, ::FeatureVector<float> &feature);
+    bool getTextEmbedding(const std::string &text, FeatureVector<float> &feature);
 
     // 获取语义向量的维度
     size_t getEmbeddingDimension() const;

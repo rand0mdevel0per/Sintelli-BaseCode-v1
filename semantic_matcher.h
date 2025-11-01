@@ -194,8 +194,11 @@ struct LogicDescriptor {
 
     // Hash函数，用于ExternalStorage
     std::string hash() const {
+        /*
         std::hash<std::string> hasher;
         return std::to_string(hasher(logic_id + description + category));
+        */
+        return sha256_hash<LogicDescriptor>(*this);
     }
 
     // 获取文本内容，用于ExternalStorage的语义查询

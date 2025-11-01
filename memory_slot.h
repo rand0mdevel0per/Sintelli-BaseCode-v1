@@ -25,7 +25,6 @@ struct MemorySlot {
 
     // 用于ExternalStorage的hash
     [[nodiscard]] std::string hash() const {
-        // 简单hash：使用memory_id
         return sha256_hash<MemorySlot>(*this);
     }
 
