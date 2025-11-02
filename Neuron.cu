@@ -3057,31 +3057,35 @@ __global__ void step_optimized(
     // 256 / 32 = 8 warps per tile
     // 32 / 16 = 2 rows per warp
     // each warp process 2 rows of 16 cols
-    for (int i = 0 ; i < 64 ; i++) {
-        // element position in tile
-        ull x_in_tile = threadIdx.x % 16;
-        ull y_in_tile = (threadIdx.x / 16) % 16;
-        // global element position
-        ull element_x = (i % 16) * 16 + x_in_tile;
-        ull element_y = (i / 16) * 16 + y_in_tile;
-        // load elements into shared memory
-        double element_a = input_matrix[element_x][element_y];
-        double element_b = n.P_Matrix[element_x][element_y];
-        As[y_in_tile][x_in_tile] = element_a;
-        Bs[y_in_tile][x_in_tile] = element_b;
-        // synchronize to make sure the matrices are loaded
-        __syncthreads();
-#pragma unroll
-        for (int k = 0 ; k < 16 ; k++) {
-            double sum = As[y_in_tile][k] * Bs[k][x_in_tile];
-            // warp reduce sum
-            sum = warpReduceSum(sum);
-            if (x_in_tile == 0 && y_in_tile == 0)
-                sum_glb += sum;
-        }
-        __syncthreads();
-        transformed_input[element_x * 256 + element_y] = sum_glb;
-        sum_glb = 0;
+    for (int i = 0 ; i < 64 ; i++) {
+        // element position in tile
+        ull x_in_tile = threadIdx.x % 16;
+        ull y_in_tile = (threadIdx.x / 16) % 16;
+        // global element position
+        ull element_x = (i % 8) * 32 + y_in_tile;  // 修正索引计算
+        ull element_y = (i / 8) * 32 + x_in_tile;  // 修正索引计算
+        // load elements into shared memory
+        if (element_x < 256 && element_y < 256) {
+            double element_a = input_matrix[element_x][element_y];
+            double element_b = n.P_Matrix[element_x][element_y];
+            As[y_in_tile][x_in_tile] = element_a;
+            Bs[y_in_tile][x_in_tile] = element_b;
+        } else {
+            As[y_in_tile][x_in_tile] = 0.0;
+            Bs[y_in_tile][x_in_tile] = 0.0;
+        }
+        // synchronize to make sure the matrices are loaded
+        __syncthreads();
+#pragma unroll
+        for (int k = 0 ; k < 16 ; k++) {
+            sum_glb += As[y_in_tile][k] * Bs[k][x_in_tile];  // 改为累加
+        }
+        __syncthreads();
+        if (element_x < 256 && element_y < 256) {  // 移除lane条件
+            transformed_input[element_x * 256 + element_y] = sum_glb;
+        }
+        __syncthreads();
+        sum_glb = 0;
     }
     /*
 __device__ void processUpdate(int port) {

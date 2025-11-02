@@ -2,7 +2,9 @@
 build/
 cmake-build-*/
 test-build/
-./build.ps1
+
+#scripts
+*.ps1
 
 # IDE files
 .idea/
