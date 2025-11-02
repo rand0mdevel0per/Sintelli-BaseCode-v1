@@ -3062,18 +3062,17 @@ __global__ void step_optimized(
         ull x_in_tile = threadIdx.x % 16;
         ull y_in_tile = (threadIdx.x / 16) % 16;
         // global element position
-        ull element_x = (i % 8) * 32 + y_in_tile;  // 修正索引计算
-        ull element_y = (i / 8) * 32 + x_in_tile;  // 修正索引计算
+        ull element_x = (i % 16) * 16 + x_in_tile;
+        ull element_y = (i / 16) * 16 + y_in_tile;
         // load elements into shared memory
+        double element_a = 0.0;
+        double element_b = 0.0;
         if (element_x < 256 && element_y < 256) {
-            double element_a = input_matrix[element_x][element_y];
-            double element_b = n.P_Matrix[element_x][element_y];
-            As[y_in_tile][x_in_tile] = element_a;
-            Bs[y_in_tile][x_in_tile] = element_b;
-        } else {
-            As[y_in_tile][x_in_tile] = 0.0;
-            Bs[y_in_tile][x_in_tile] = 0.0;
+            element_a = input_matrix[element_x][element_y];
+            element_b = n.P_Matrix[element_x][element_y];
         }
+        As[y_in_tile][x_in_tile] = element_a;
+        Bs[y_in_tile][x_in_tile] = element_b;
         // synchronize to make sure the matrices are loaded
         __syncthreads();
 #pragma unroll

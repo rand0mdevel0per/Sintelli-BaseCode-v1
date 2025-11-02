@@ -1,67 +1,58 @@
 services:
   python-40_cutlass_py:
     build:
-      context: ./examples/40_cutlass_py
+      context: ./cutlass/examples/40_cutlass_py
+    container_name: python-40_cutlass_py
     restart: unless-stopped
-    init: true
-    # env_file: ./.env  # Uncomment if .env file exists
-    # Default command runs gemm.py, as per Dockerfile
-    # No ports exposed (no EXPOSE or README info)
+    # env_file: ./.env  # Uncomment if .env file exists in ./cutlass/examples/40_cutlass_py
+    # No ports exposed; adjust if README or code specifies any
+    # No external dependencies detected
 
   python-41_fused_multi_head_attention:
     build:
-      context: ./examples/41_fused_multi_head_attention
+      context: ./cutlass/examples/41_fused_multi_head_attention
+    container_name: python-41_fused_multi_head_attention
     restart: unless-stopped
-    init: true
-    # env_file: ./.env  # Uncomment if .env file exists
-    # Default command runs fmha_backward_test.py
-    # No ports exposed (no EXPOSE or README info)
+    # env_file: ./.env  # Uncomment if .env file exists in ./cutlass/examples/41_fused_multi_head_attention
+    # No ports exposed; adjust if README or code specifies any
+    # No external dependencies detected
+    # Default command runs fmha_backward_test.py (see Dockerfile)
 
-  python-44_multi_gemm_ir_and_codegen_ir_gen:
+  python-ampere:
     build:
-      context: ./examples/44_multi_gemm_ir_and_codegen/ir_gen
+      context: ./cutlass/python/CuTeDSL/ampere
+    container_name: python-ampere
     restart: unless-stopped
-    init: true
-    # env_file: ./.env  # Uncomment if .env file exists
-    # Default command runs gen_all_code.py
-    # No ports exposed (no EXPOSE or README info)
+    # env_file: ./.env  # Uncomment if .env file exists in ./cutlass/python/CuTeDSL/ampere
+    # No ports exposed; adjust if README or code specifies any
+    # No external dependencies detected
 
-  python-CuTeDSL_ampere:
+  python-blackwell:
     build:
-      context: ./python/CuTeDSL/ampere
+      context: ./cutlass/python/CuTeDSL/blackwell
+    container_name: python-blackwell
     restart: unless-stopped
-    init: true
-    # env_file: ./.env  # Uncomment if .env file exists
-    # Default command runs call_bypass_dlpack module
-    # No ports exposed (no EXPOSE or README info)
+    # env_file: ./.env  # Uncomment if .env file exists in ./cutlass/python/CuTeDSL/blackwell
+    # No ports exposed; adjust if README or code specifies any
+    # No external dependencies detected
 
-  python-CuTeDSL_blackwell_mamba2_ssd:
+  python-cute-ffi:
     build:
-      context: ./python/CuTeDSL/blackwell/mamba2_ssd
+      context: ./cutlass/python/CuTeDSL/cute/ffi
+    container_name: python-cute-ffi
     restart: unless-stopped
-    init: true
-    # env_file: ./.env  # Uncomment if .env file exists
-    # Default command runs mamba2_ssd.py
-    # No ports exposed (no EXPOSE or README info)
+    # env_file: ./.env  # Uncomment if .env file exists in ./cutlass/python/CuTeDSL/cute/ffi
+    # No ports exposed; adjust if README or code specifies any
+    # No external dependencies detected
 
-  python-CuTeDSL_cute_ffi:
+  python-hopper:
     build:
-      context: ./python/CuTeDSL/cute/ffi
+      context: ./cutlass/python/CuTeDSL/hopper
+    container_name: python-hopper
     restart: unless-stopped
-    init: true
-    # env_file: ./.env  # Uncomment if .env file exists
-    # Default command runs python (no main.py specified)
-    # No ports exposed (no EXPOSE or README info)
+    # env_file: ./.env  # Uncomment if .env file exists in ./cutlass/python/CuTeDSL/hopper
+    # No ports exposed; adjust if README or code specifies any
+    # No external dependencies detected
 
-  python-CuTeDSL_hopper:
-    build:
-      context: ./python/CuTeDSL/hopper
-    restart: unless-stopped
-    init: true
-    # env_file: ./.env  # Uncomment if .env file exists
-    # Default command runs hopper module
-    # No ports exposed (no EXPOSE or README info)
-
-# No external services detected in documentation or Dockerfiles
-# No ports exposed, no volumes required
-# All services use restart: unless-stopped and init: true for reliability
+# No external services (databases, caches, etc.) detected in documentation or code
+# No networks section needed as no inter-service communication is required
