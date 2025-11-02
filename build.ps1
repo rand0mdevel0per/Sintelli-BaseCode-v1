@@ -17,17 +17,20 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "Configuring the project with CMake..."
 Write-Host "# D:\CMake\bin\cmake.exe -G "Visual Studio 17 2022" -DCMAKE_TOOLCHAIN_FILE=D:\VisualStudio2026\VC\vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DPython_EXECUTABLE=D:/Python313/python.exe -DPython3_EXECUTABLE=D:/Python313/python.exe -S E:\Sintelli\src -B E:\Sintelli\src\cmake-build-debug-visual-studio"
 D:\CMake\bin\cmake.exe -G "Visual Studio 17 2022" -DCMAKE_TOOLCHAIN_FILE=D:\VisualStudio2026\VC\vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DPython_EXECUTABLE=D:/Python313/python.exe -DPython3_EXECUTABLE=D:/Python313/python.exe -S E:\Sintelli\src -B E:\Sintelli\src\cmake-build-debug-visual-studio
-Write-Host "CMake configuration completed."
+Write-Host "CL CMake configuration completed."
+Write-Host "Use Ninja to export compile commands..."
+Write-Host "# D:\CMake\bin\cmake.exe -DCMAKE_BUILD_TYPE=Debug -DCMAKE_MAKE_PROGRAM=D:/Jetbrains/CLion/bin/ninja/win/x64/ninja.exe -DCMAKE_TOOLCHAIN_FILE=D:\VisualStudio2026\VC\vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -G Ninja -DPython_EXECUTABLE=D:/Python313/python.exe -DPython3_EXECUTABLE=D:/Python313/python.exe -S E:\Sintelli\src -B E:\Sintelli\src\cmake-build-debug-visual-studio-1"
+D:\CMake\bin\cmake.exe -DCMAKE_BUILD_TYPE=Debug -DCMAKE_MAKE_PROGRAM=D:/Jetbrains/CLion/bin/ninja/win/x64/ninja.exe -DCMAKE_TOOLCHAIN_FILE=D:\VisualStudio2026\VC\vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -G Ninja -DPython_EXECUTABLE=D:/Python313/python.exe -DPython3_EXECUTABLE=D:/Python313/python.exe -S E:\Sintelli\src -B E:\Sintelli\src\cmake-build-debug-visual-studio-1
 Write-Host "Running Qodana code analysis..."
-Copy-Item ./cmake-build-debug-visual-studio/compile_commands.json ./build/compile_commands.json -Force
+Copy-Item ./cmake-build-debug-visual-studio-1/compile_commands.json ./build/compile_commands.json -Force
 qodana scan
 Write-Host "Building the project..."
 Write-Host "Build output will be logged to compile.log"
 Write-Host "# D:\CMake\bin\cmake.exe --build E:\Sintelli\src\cmake-build-debug-visual-studio --target src --config Debug"
 D:\CMake\bin\cmake.exe --build E:\Sintelli\src\cmake-build-debug-visual-studio --target src --config Debug >> E:\Sintelli\compile.log 2>&1
 if ($LASTEXITCODE -ne 0) {
-    Write-Error "Build failed. Check compile.log for details."
-    Write-Debug "Errors:"
+    Write-Host "Build failed. Check compile.log for details."
+    Write-Host "Errors:"
     Get-Content ./compile.log | findstr -i error
     Write-Host "Exiting..."
     exit $LASTEXITCODE

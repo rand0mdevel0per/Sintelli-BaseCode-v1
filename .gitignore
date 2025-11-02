@@ -2,6 +2,7 @@
 build/
 cmake-build-*/
 test-build/
+./build.ps1
 
 # IDE files
 .idea/
@@ -11,10 +12,10 @@ test-build/
 .cache/
 
 # External libraries (already managed by vcpkg)
-#cutlass/
-#json/
-#tokenizers/
-#onnx/
+cutlass/
+json/
+tokenizers/
+onnx/
 
 # vcpkg installed dependencies
 vcpkg_installed/
