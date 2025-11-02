@@ -5,6 +5,33 @@
 #include <curand_kernel.h>
 #include <cmath>
 
+
+ull atomic_add_ull_builtin_(ull *ptr, ull value) {
+#if defined(__GNUC__) || defined(__clang__)
+    // GCC/Clang
+    return __sync_fetch_and_add(ptr, value);
+#elif defined(_MSC_VER)
+    // MSVC
+#ifdef _WIN64
+    return _InterlockedExchangeAdd64(reinterpret_cast<__int64 *>(ptr), static_cast<__int64>(value));
+#else
+    // WIN32
+    return _InterlockedExchangeAdd64((__int64 *) ptr, (__int64) value);
+#endif
+#else
+#warning "Using fallback atomic implementation"
+    return __sync_fetch_and_add(ptr, value);
+#endif
+}
+#ifndef __CUDA_ARCH__
+ull atomicAdd__(ull *ptr, ull value) {
+    return atomic_add_ull_builtin_(ptr, static_cast<__int64>(value));
+}
+
+#define atomicAdd atomicAdd__
+#endif
+
+
 // ===== 16×16卷积核 =====
 struct ConvKernel16 {
     double kernel[16][16];
@@ -217,7 +244,7 @@ private:
     };
 
     Block blocks[MAX_BLOCKS] = {};
-    int free_count = 0;
+    ull free_count = 0;
 
 public:
     __host__ void initialize() {
@@ -236,7 +263,7 @@ public:
             if (!blocks[i].in_use) {
                 blocks[i].in_use = true;
                 blocks[i].ref_count = 1;
-                atomicSub(&free_count, 1);
+                atomicAdd(&free_count, -1ULL);
                 return i;
             }
         }
@@ -245,7 +272,7 @@ public:
 
     __device__ void addRef(int block_id) {
         if (block_id >= 0 && block_id < MAX_BLOCKS) {
-            atomicAdd(&blocks[block_id].ref_count, 1);
+            _InterlockedExchangeAdd64(reinterpret_cast<__int64 *>(&blocks[block_id].ref_count), 1);
         }
     }
 
@@ -266,7 +293,7 @@ public:
         return nullptr;
     }
 
-    __device__ int getFreeCount() {
+    __device__ ull getFreeCount() const {
         return free_count;
     }
 
@@ -278,7 +305,7 @@ public:
 };
 
 // ===== 全局统一内存池实例 =====
-UnifiedMemoryPool global_memory_pool;
+__device__ UnifiedMemoryPool global_memory_pool;
 
 // ===== Convolution and Residual Processing =====
 /**
@@ -386,8 +413,8 @@ public:
                 double fj = j / 32.0;
                 int i0 = (int)fi;
                 int j0 = (int)fj;
-                int i1 = min(i0 + 1, 7);
-                int j1 = min(j0 + 1, 7);
+                int i1 = std::min(i0 + 1, 7);
+                int j1 = std::min(j0 + 1, 7);
 
                 double wi = fi - i0;
                 double wj = fj - j0;

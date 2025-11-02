@@ -5,7 +5,11 @@
 #include <vector>
 #include <memory>
 
+// IMPORTANT: 必须在使用前包含模板定义
 #include "isw.hpp"
+
+template<typename T>
+class FeatureVector;
 
 // 语义查询引擎 - 独立的语义处理类，使用smry.cpp中的E5模型
 class SemanticQueryEngine {
@@ -38,7 +42,7 @@ public:
 
     // 批量获取文本嵌入
     bool getBatchEmbeddings(const std::vector<std::string> &texts,
-                            std::vector<::FeatureVector<float> > &features);
+                            std::vector<FeatureVector<float> > &features);
 
     // 计算两个文本之间的语义相似度
     double getSemanticSimilarity(const std::string &text1, const std::string &text2);

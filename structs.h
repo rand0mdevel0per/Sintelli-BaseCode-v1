@@ -58,19 +58,35 @@ struct KFE_STM_Slot {
     double Vmem[256][256]; // Knowledge fragment vector
     double V; // Slot validity flag
     double conv16[16][16]; // 16x16 convolution features
-    std::string hash() const {
+    
+    __host__ __device__ std::string hash() const {
+#ifdef __CUDA_ARCH__
+        // 在设备端使用简化的hash方法
+        char hash_buffer[64];
+        sprintf(hash_buffer, "KFE_%d_%f", Rcycles, Ulocal + Icore);
+        return std::string(hash_buffer);
+#else
         return sha256_hash<KFE_STM_Slot>(*this);
+#endif
     }
+
     __device__ void conv() {
         ConvResidualProcessor::conv2d_16x16(Vmem, ConvKernel16(), conv16);
     }
     
     // 添加getText函数以支持ExternalStorage的语义查询
-    std::string getText() const {
+    __host__ __device__ std::string getText() const {
+#ifdef __CUDA_ARCH__
+        // 在设备端使用简化的文本表示
+        char text_buffer[256];
+        sprintf(text_buffer, "KFE_STM_Slot: Ulocal=%.4f, Rcycles=%d, Icore=%.4f", Ulocal, Rcycles, Icore);
+        return std::string(text_buffer);
+#else
         std::string text = "KFE_STM_Slot: Ulocal=" + std::to_string(Ulocal) + 
                           ", Rcycles=" + std::to_string(Rcycles) + 
                           ", Icore=" + std::to_string(Icore);
         return text;
+#endif
     }
 };
 
@@ -90,7 +106,7 @@ struct Logic {
     ull Rcycles;
     wchar_t content[1024]; // Fixed-size character array替代 std::string
     double importance;
-    std::string hash() {
+    std::string hash() const {
         return sha256_hash<Logic>(*this);
     }
     
@@ -242,8 +258,8 @@ struct ConnectionInfo {
 
 struct NeuronData {
     // ===== 端口系统(4个逻辑端口) =====
-    std::queue<NeuronInput> port_in[4]{};
-    std::queue<NeuronInput> port_out[4]{};
+    DeviceQueue<NeuronInput, 1024> port_in[4]{};
+    DeviceQueue<NeuronInput, 1024> port_out[4]{};
     ll port_counts[4]{}; // 每个端口的连接数
 
     // ===== 连接信息 =====
@@ -263,6 +279,19 @@ struct NeuronData {
     double M_KFE[256][256]{}; // KFE知识上下文
     double Deviation[256][256]{}; // 预测误差
     double PS_aggregate[256][256]{}; // 邻居共识
+    
+    // ===== 基本状态变量 =====
+    double activity{}; // 神经元活跃度
+    bool training{}; // 是否处于训练模式
+    double learn{}; // 学习率
+    double noise{}; // 噪声水平
+    double core_vulnerability{}; // 核心脆弱性
+    double importance{}; // 重要性
+    
+    // ===== 训练相关变量 =====
+    int training_interval{}; // 训练间隔
+    int training_count{}; // 训练次数
+    int last_training_time{}; // 上次训练时间
 };
 
 #endif //SRC_STRUCTS_H

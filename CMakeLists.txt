@@ -17,6 +17,8 @@ if(MSVC)
     set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler=/utf-8")
 endif()
 
+set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -O1 -Wall")
+
 project(src CXX CUDA)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -116,7 +118,7 @@ target_compile_options(src
 
 target_compile_definitions(src
         PRIVATE
-        CUTLASS_AVAILABLE
+        #CUTLASS_AVAILABLE
         CROW_STANDALONE_ASIO
         $<$<NOT:$<BOOL:${LZMA_LIBRARY}>>:NO_LZMA_SUPPORT>
 )
@@ -141,7 +143,7 @@ target_include_directories(src
 
 target_compile_definitions(src
         PRIVATE
-        CUTLASS_AVAILABLE
+        #CUTLASS_AVAILABLE
         CROW_STANDALONE_ASIO
         $<$<NOT:$<BOOL:${LZMA_LIBRARY}>>:NO_LZMA_SUPPORT>
 )
@@ -215,8 +217,6 @@ message(STATUS "Project configuration completed")
 message(STATUS "========================================")
 
 message(STATUS "Output: sintelli_base${CMAKE_SHARED_LIBRARY_SUFFIX}")
-
-message(STATUS "Test program: test_mtools")
 
 message(STATUS "Python: ${Python3_VERSION}")
 

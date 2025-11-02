@@ -24,7 +24,7 @@ unsigned long long atomic_add_ull_builtin(unsigned long long* ptr, unsigned long
     #elif defined(_MSC_VER)
         // MSVC 版本 - 即使NVCC也可能支持这些
     #ifdef _WIN64
-        return _InterlockedExchangeAdd64((__int64*)ptr, (__int64)value);
+        return _InterlockedExchangeAdd64(reinterpret_cast<__int64 *>(ptr), static_cast<__int64>(value));
     #else
         // 32位Windows
         return _InterlockedExchangeAdd64((__int64*)ptr, (__int64)value);

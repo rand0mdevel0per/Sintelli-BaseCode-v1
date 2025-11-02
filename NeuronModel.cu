@@ -400,7 +400,7 @@ public:
         // Inject matching Logic into neuron
         for (const auto &[logic_id, neuron_input]: activated_logics) {
             if (neuron_index >= 0 && neuron_index < GRID_SIZE * GRID_SIZE * GRID_SIZE) {
-                d_neurons[neuron_index].inject(neuron_input, port);
+                injectNeuronKernel<<<1, 1>>>(d_neurons, neuron_input, neuron_index, port); cudaDeviceSynchronize();
                 std::cout << "Injecting Logic: " << logic_id << " to neuron " << neuron_index
                         << " port " << port << std::endl;
             }
@@ -447,7 +447,7 @@ public:
                 img_inp.from_coord[1] = 0;
                 img_inp.from_coord[2] = 0;
                 img_inp.weight = 1.0;
-                d_neurons[0].inject(img_inp, 1);
+                injectNeuronKernel<<<1, 1>>>(d_neurons, img_inp, 0, 1); cudaDeviceSynchronize();
             }
             if (msg.has_text) {
                 processTextString(&processor, "<User:" + role + "> " + msg.text);
@@ -903,7 +903,7 @@ private:
                         logic_inp.from_coord[1] = 0;
                         logic_inp.from_coord[2] = 0;
                         logic_inp.weight = 1.0;
-                        d_neurons[4].inject(logic_inp, i);
+                        injectNeuronKernel<<<1, 1>>>(d_neurons, logic_inp, 4, i); cudaDeviceSynchronize();
                     }
                 }
             }
@@ -919,7 +919,7 @@ private:
                         sct_inp.from_coord[1] = 0;
                         sct_inp.from_coord[2] = 0;
                         sct_inp.weight = 1.0;
-                        d_neurons[5].inject(sct_inp, i);
+                        injectNeuronKernel<<<1, 1>>>(d_neurons, sct_inp, 5, i); cudaDeviceSynchronize();
                     }
                 }
             }
@@ -935,7 +935,7 @@ private:
                         memory_inp.from_coord[1] = 0;
                         memory_inp.from_coord[2] = 0;
                         memory_inp.weight = 1.0;
-                        d_neurons[6].inject(memory_inp, i);
+                        injectNeuronKernel<<<1, 1>>>(d_neurons, memory_inp, 6, i); cudaDeviceSynchronize();
                     }
                 }
             }
@@ -951,7 +951,7 @@ private:
                         cache_inp.from_coord[1] = 0;
                         cache_inp.from_coord[2] = 0;
                         cache_inp.weight = 1.0;
-                        d_neurons[11].inject(cache_inp, i);
+                        injectNeuronKernel<<<1, 1>>>(d_neurons, cache_inp, 11, i); cudaDeviceSynchronize();
                     }
                 }
             }

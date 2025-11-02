@@ -459,7 +459,10 @@ public:
     ExternalStorage(const ExternalStorage& other) {
         l2_memory_pool = other.l2_memory_pool;
         l2_max_size = other.l2_max_size;
-        *heat_index = (*other.heat_index);
+        // 正确复制heat_index
+        if (other.heat_index) {
+            heat_index = std::make_unique<vEB_Tree<DataDescriptor>>(*other.heat_index);
+        }
         descriptor_map = other.descriptor_map;
         hash_to_slot = other.hash_to_slot;
         feature_index = other.feature_index;
@@ -470,7 +473,25 @@ public:
         persistence_path = other.persistence_path + ".cp";
     };
     ExternalStorage& operator=(const ExternalStorage& other) {
-        return ExternalStorage(other);
+        if (this != &other) {
+            l2_memory_pool = other.l2_memory_pool;
+            l2_max_size = other.l2_max_size;
+            // 正确复制heat_index
+            if (other.heat_index) {
+                heat_index = std::make_unique<vEB_Tree<DataDescriptor>>(*other.heat_index);
+            } else {
+                heat_index.reset();
+            }
+            descriptor_map = other.descriptor_map;
+            hash_to_slot = other.hash_to_slot;
+            feature_index = other.feature_index;
+            promote_threshold = other.promote_threshold;
+            demote_threshold = other.demote_threshold;
+            current_time = other.current_time;
+            next_slot_id = other.next_slot_id;
+            persistence_path = other.persistence_path;
+        }
+        return *this;
     }
 
     // ===== Core API =====
@@ -486,15 +507,15 @@ public:
      * @param initial_heat Initial heat value for the data (affects tier placement)
      * @return Unique slot ID for the stored data
      */
-    template<typename = std::enable_if_t<
-        std::is_invocable_r_v<std::string, decltype(&T::hash), T>>>
+    template<typename U = T, typename = std::enable_if_t<
+        std::is_invocable_r_v<std::string, decltype(&U::hash), U>>>
     uint64_t store(const T& data, double initial_heat = 1.0) {
         return storeWithFeature(data, FeatureVector<float>(), initial_heat);
     }
 
     // 存储数据(带特征向量) 喵
-    template<typename = std::enable_if_t<
-        std::is_invocable_r_v<std::string, decltype(&T::hash), T>>>
+    template<typename U = T, typename = std::enable_if_t<
+        std::is_invocable_r_v<std::string, decltype(&U::hash), U>>>
     uint64_t store(const T& data, const ::FeatureVector<float>& feature, double initial_heat = 1.0) {
         return storeWithFeature(data, feature, initial_heat);
     }
@@ -531,8 +552,8 @@ public:
      * @param out_data Reference to store the fetched data
      * @return true if successful, false if data not found
      */
-    template<typename = std::enable_if_t<
-        std::is_invocable_r_v<std::string, decltype(&T::hash), T>>>
+    template<typename U = T, typename = std::enable_if_t<
+        std::is_invocable_r_v<std::string, decltype(&U::hash), U>>>
     bool fetchByHash(std::string hash_val, T& out_data) {
         std::lock_guard<std::mutex> lock(storage_mutex);
 
@@ -615,8 +636,8 @@ public:
     // ===== 特征匹配API =====
 
     // 存储数据并关联特征向量 喵
-    template<typename = std::enable_if_t<
-        std::is_invocable_r_v<std::string, decltype(&T::hash), T>>>
+    template<typename U = T, typename = std::enable_if_t<
+        std::is_invocable_r_v<std::string, decltype(&U::hash), U>>>
     uint64_t storeWithFeature(const T& data, const ::FeatureVector<float>& feature, double initial_heat = 1.0) {
         std::lock_guard<std::mutex> lock(storage_mutex);
 
@@ -732,8 +753,8 @@ public:
     }
 
     // 批量存储特征向量 喵
-    template<typename = std::enable_if_t<
-        std::is_invocable_r_v<std::string, decltype(&T::hash), T>>>
+    template<typename U = T, typename = std::enable_if_t<
+        std::is_invocable_r_v<std::string, decltype(&U::hash), U>>>
     std::vector<uint64_t> batchStoreWithFeatures(
         const std::vector<std::pair<T, ::FeatureVector<float>>>& data_features,
         double initial_heat = 1.0) {
@@ -822,8 +843,8 @@ public:
     // ===== 语义查询API =====
 
     // 语义查询接口(需要T类型实现getText()方法) 喵
-    template<typename = std::enable_if_t<
-        std::is_invocable_r_v<std::string, decltype(&T::getText), T>>>
+    template<typename U = T, typename = std::enable_if_t<
+        std::is_invocable_r_v<std::string, decltype(&U::getText), U>>>
     std::vector<std::pair<uint64_t, double>> semanticSearch(
         const std::string& query_text,
         int k = 10,
@@ -853,8 +874,8 @@ public:
     }
 
     // 语义查询接口(宽字符版本) 喵
-    template<typename = std::enable_if_t<
-        std::is_invocable_r_v<std::string, decltype(&T::getText), T>>>
+    template<typename U = T, typename = std::enable_if_t<
+        std::is_invocable_r_v<std::string, decltype(&U::getText), U>>>
     std::vector<std::pair<uint64_t, double>> semanticSearch(
         const std::wstring& query_text,
         int k = 10,
@@ -873,9 +894,9 @@ public:
     }
 
     // 存储数据并自动计算语义特征 喵
-    template<typename = std::enable_if_t<
-        std::is_invocable_r_v<std::string, decltype(&T::hash), T> &&
-        std::is_invocable_r_v<std::string, decltype(&T::getText), T>>>
+    template<typename U = T, typename = std::enable_if_t<
+        std::is_invocable_r_v<std::string, decltype(&U::hash), U> &&
+        std::is_invocable_r_v<std::string, decltype(&U::getText), U>>>
     uint64_t storeWithSemanticFeature(const T& data, 
                                      double initial_heat = 1.0,
                                      const std::string& model_path = "",
@@ -906,9 +927,9 @@ public:
     }
 
     // 批量存储数据并自动计算语义特征 喵
-    template<typename = std::enable_if_t<
-        std::is_invocable_r_v<std::string, decltype(&T::hash), T> &&
-        std::is_invocable_r_v<std::string, decltype(&T::getText), T>>>
+    template<typename U = T, typename = std::enable_if_t<
+        std::is_invocable_r_v<std::string, decltype(&U::hash), U> &&
+        std::is_invocable_r_v<std::string, decltype(&U::getText), U>>>
     std::vector<uint64_t> batchStoreWithSemanticFeatures(
         const std::vector<T>& data_list,
         double initial_heat = 1.0,

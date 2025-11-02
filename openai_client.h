@@ -248,6 +248,12 @@ namespace OpenAIClient {
             std::string image_url; ///< URL of generated image (for image generation models)
 
             std::string image_b64; ///< Base64 encoded image data (for image generation models)
+
+            Choice() : index(0), message(ChatMessage("", "")) {
+            }
+
+            Choice(const int i, ChatMessage chat_message) : index(i), message(std::move(chat_message)) {
+            }
         };
 
         /**
@@ -693,6 +699,9 @@ namespace OpenAIClient {
          * @copydoc OpenAIClient::deleteFile
          */
         bool deleteFile(const std::string &file_id) override;
+
+        ImageGenerationResponse createImage(const std::string &prompt, int n, const std::string &size,
+                                            const std::string &response_format);
     };
 } // namespace OpenAIClient
 

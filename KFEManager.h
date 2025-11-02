@@ -54,7 +54,7 @@ private:
 
             KFE_STM_Slot slot;
 
-            if (storage_queue_ && storage_queue_->pop(slot)) {
+            if (storage_queue_ && storage_queue_->h_pop(slot)) {
                 std::lock_guard<std::mutex> lock(storage_mutex_);
 
                 kfe_storage_[slot.hash().c_str()] = slot;
@@ -65,13 +65,13 @@ private:
 
             GPUString query_hash;
 
-            if (query_queue_ && query_queue_->pop(query_hash)) {
+            if (query_queue_ && query_queue_->h_pop(query_hash)) {
                 std::lock_guard<std::mutex> lock(storage_mutex_);
 
                 auto it = kfe_storage_.find(query_hash);
 
                 if (it != kfe_storage_.end() && result_queue_) {
-                    result_queue_->host_push(it->second);
+                    result_queue_->h_push(it->second);
                 }
             }
 
@@ -175,7 +175,7 @@ public:
 
         KFE_STM_Slot slot;
 
-        while (storage_queue_ && storage_queue_->host_pop(slot)) {
+        while (storage_queue_ && storage_queue_->h_pop(slot)) {
             std::lock_guard<std::mutex> lock(storage_mutex_);
 
             kfe_storage_[slot.hash().c_str()] = slot;
@@ -202,7 +202,7 @@ public:
 
         GPUString query_hash;
 
-        while (query_queue_ && query_queue_->host_pop(query_hash)) {
+        while (query_queue_ && query_queue_->h_pop(query_hash)) {
             std::lock_guard<std::mutex> lock(storage_mutex_);
 
             auto it = kfe_storage_.find(query_hash);
@@ -210,7 +210,7 @@ public:
             if (it != kfe_storage_.end() && result_queue_) {
                 // 将查询结果推送到结果队列
 
-                result_queue_->host_push(it->second);
+                result_queue_->h_push(it->second);
 
                 count++;
             }

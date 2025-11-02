@@ -333,4 +333,25 @@ private:
 };
 */
 
+// 为GPUString提供哈希支持
+namespace std {
+    template<>
+    struct hash<GPUString> {
+        __host__ __device__ size_t operator()(const GPUString& str) const {
+#ifdef __CUDA_ARCH__
+            // 设备端使用简单哈希
+            size_t hash = 0;
+            const char* c_str = str.c_str();
+            for (size_t i = 0; i < str.size(); i++) {
+                hash = hash * 31 + c_str[i];
+            }
+            return hash;
+#else
+            // 主机端使用标准哈希
+            return std::hash<std::string>{}(std::string(str.c_str()));
+#endif
+        }
+    };
+}
+
 #endif // GPU_CONTAINERS_CUH
