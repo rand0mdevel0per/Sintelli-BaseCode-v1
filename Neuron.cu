@@ -30,6 +30,7 @@
 #include "GPUMutex.cu"
 #include <cuda_fp16.h>
 #include "gpu_containers.cuh"
+#include "cutlass/epilogue/thread/linear_combination.h"
 #include "nlohmann/json.hpp"
 
 #define ll long long
@@ -497,7 +498,7 @@ public:
         return fmax(val, 0.0);
     }
 
-    __host__ __device__ double randomInRange(double min, double max) {
+    static __host__ __device__ double randomInRange(double min, double max) {
 #ifdef __CUDA_ARCH__
         return curand_uniform_double(&rand_state) * (max - min) + min;
 #else
@@ -1427,17 +1428,6 @@ public:
 
                 matmul_double(&temp_inp.array[0][0], &input_multiplex_array[0][0][p],
                               &transformed_input[0][0]);
-                /*
-                dim3 block(16, 16);
-                dim3 grid((256 + 15) / 16, (256 + 15) / 16);
-
-                tiledMatMulShared<16><<<grid, block>>>(
-                    &temp_inp.array[0][0], &input_multiplex_array[0][0][p], &transformed_input[0][0],
-                    256, 256, 256
-                );
-                */
-
-
                 extractConvFeatures(p, transformed_input);
 
                 double score = 0.0;
@@ -2613,59 +2603,6 @@ __global__ void step_inf(
                 obj_y] * score + wkv / (
                 wkv + state));
     }
-    //todo!
-    /*
-    // normalize
-        if (weight_sum > 1e-6) {
-            for (int i = 0; i < 256; i++) {
-                for (int j = 0; j < 256; j++) {
-                    PS_aggregate[i][j] /= weight_sum;
-                }
-            }
-        }
-
-        // deviation
-        for (int i = 0; i < 256; i++) {
-            for (int j = 0; j < 256; j++) {
-                Deviation[i][j] = __half2float(PS_aggregate[i][j]) - P_stable[i][j];
-            }
-        }
-        STM_aggregate_utility = computeKFEAttention();
-
-        bool trigger_gemm = false;
-        if (cycle_counter % 16 == 0) {
-            trigger_gemm = true;
-        }
-        double deviation_norm = 0.0;
-        for (int i = 0; i < 256; i++) {
-            for (int j = 0; j < 256; j++) {
-                deviation_norm += Deviation[i][j] * Deviation[i][j];
-            }
-        }
-        deviation_norm = sqrt(deviation_norm / (256.0 * 256.0));
-        if (deviation_norm > 0.5) {
-            trigger_gemm = true;
-        }
-        if (core_vulnerability > 0.7) {
-            trigger_gemm = true;
-        }
-        if (STM_aggregate_utility > 0.6) {
-            trigger_gemm = true;
-        }
-
-        if (trigger_gemm) {
-            executeGEMMAndDRC();
-        } else {
-            executeMicroCorrection();
-        }
-
-
-        broadcastOutput();
-
-        for (int p = 0; p < 4; p++) {
-            updateConvKernels(p);
-        }
-     */
     if (sum > 1e-6 && port == 0 && obj_x == 0 && obj_y == 0) {
         n.PS_aggregate[obj_x][obj_y] /= sum;
     }
@@ -2765,196 +2702,16 @@ __global__ void step_inf(
     }
     __syncthreads();
     if (port != 0)
-        goto ret;
+        return;
     if (!trigger_gemm)
         goto not_trg;
-    /*
-     addPositionalEncoding();
-        // === Step 1: GEMM core inference ===
-        double P_Next[256][256];
-        double temp_product[256][256];
-
-        double P_Original[256][256];
-        memcpy(&P_Original, &P_Matrix, sizeof(P_Matrix));
-
-        double W_backup[256][256];
-        if (training) {
-            memcpy(W_backup, W_predict, sizeof(W_predict));
-            for (int i = 0; i < 256; i++) {
-                for (int j = 0; j < 256; j++) {
-                    if (curand_uniform(&rand_state) < 0.05) {
-                        W_predict[i][j] = 0.0;
-                    }
-                }
-            }
-        }
-
-        // P_Matrix × W_predict
-        matmul_double(&P_Matrix[0][0], &W_predict[0][0], &temp_product[0][0]);
-
-        // Add KFE context and apply GELU activation
-        for (int i = 0; i < 256; i++) {
-            for (int j = 0; j < 256; j++) {
-                double x = temp_product[i][j] + M_KFE[i][j];
-                // GELU activation
-                P_Next[i][j] = 0.5 * x * (1.0 + tanh(0.797885 * (x + 0.044715 * x * x * x)));
-            }
-        }
-
-        // === Step 2: Compute fixed target T_fixed ===
-        double T_fixed[256][256];
-        double alpha = 0.7;
-
-        for (int i = 0; i < 256; i++) {
-            for (int j = 0; j < 256; j++) {
-                T_fixed[i][j] = alpha * __half2float(PS_aggregate[i][j]) +
-                                (1.0 - alpha) * P_Next[i][j];
-            }
-        }
-
-        // === Step 3: 16 rounds of DRC iterative correction ===
-        double P_current[256][256];
-        memcpy(P_current, P_Next, sizeof(P_current));
-
-        double epsilon = 1e-4;
-        double eta_base = 0.1;
-        double lambda = 0.9;
-
-        double prev_diff_norm = 0.0;
-
-        for (int iter = 0; iter < 16; iter++) {
-            double P_new[256][256];
-
-            for (int i = 0; i < 256; i++) {
-                {
-                    for (int j = 0; j < 256; j++) {
-                        // 1. 基础修正项
-                        double V_corr = (T_fixed[i][j] - P_current[i][j]) * eta_base;
-
-                        // 2. 局部注意力调制
-                        double local_feature = 0.0;
-                        for (int p = 0; p < 4; p++) {
-                            if (!port_in[p].empty()) {
-                                NeuronInput temp = port_in[p].front();
-                                local_feature += temp.array[i][j];
-                            }
-                        }
-                        local_feature /= 4.0;
-
-                        double attn_weight = 1.0 / (1.0 + exp(-(local_feature * P_current[i][j])));
-                        double M_attn = attn_weight * V_corr;
-
-                        // 3. 历史动量项
-                        double V_hist = 0.0;
-                        if (iter > 0) {
-                            for (int h = 1; h <= min(iter, 3); h++) {
-                                int hist_idx = (history_index - h + 5) % 5;
-                                int prev_idx = (hist_idx - 1 + 5) % 5;
-                                double delta = P_history[hist_idx][i][j] -
-                                               P_history[prev_idx][i][j];
-                                V_hist += pow(lambda, h) * delta;
-                            }
-                        }
-
-                        // 组合修正
-                        P_new[i][j] = P_current[i][j] + V_corr + M_attn + V_hist;
-                    }
-                }
-            }
-
-            // 检查收敛
-            double diff_norm = 0.0;
-            for (int i = 0; i < 256; i++) {
-                for (int j = 0; j < 256; j++) {
-                    double diff = P_new[i][j] - P_current[i][j];
-                    diff_norm += diff * diff;
-                }
-            }
-            diff_norm = sqrt(diff_norm);
-
-            // 更新历史
-            history_index = (history_index + 1) % 5;
-            for (int i = 0; i < 256; i++) {
-                for (int j = 0; j < 256; j++) {
-                    P_history[history_index][i][j] = __float2half(P_current[i][j]);
-                }
-            }
-            memcpy(P_current, P_new, sizeof(P_current));
-
-            // 早停
-            if (diff_norm < epsilon) {
-                break;
-            }
-            if (iter > 8 && diff_norm > prev_diff_norm) {
-                // 开始震荡,停止
-                break;
-            }
-            prev_diff_norm = diff_norm;
-        }
-
-        double beta_schedule[16]; // 噪声调度
-
-        // 余弦调度 (类似Improved DDPM)
-        for (int t = 0; t < 16; t++) {
-            double alpha_t = cos(PI * t / 32.0);
-            beta_schedule[t] = 1.0 - alpha_t * alpha_t;
-        }
-
-        double P_Nsc[256][256];
-        memcpy(&P_Nsc, &P_Original, sizeof(P_Nsc));
-
-        // 迭代去噪
-        for (int t = 15; t >= 0; t--) {
-            // 反向扩散
-            double beta = beta_schedule[t];
-
-            // 预测噪声
-            double noise_pred[256][256];
-            predictNoise(P_Nsc, noise_pred);
-
-            // 去噪一步
-            for (int i = 0; i < 256; i++) {
-                for (int j = 0; j < 256; j++) {
-                    P_Nsc[i][j] -= sqrt(beta) * noise_pred[i][j];
-                    P_Nsc[i][j] = (P_Nsc[i][j] -
-                                   sqrt(beta) * noise_pred[i][j]) /
-                                  sqrt(1.0 - beta);
-                }
-            }
-        }
-
-        for (int i = 0; i < 256; i++) {
-            for (int j = 0; j < 256; j++) {
-                constexpr double alpha_c = 0.7;
-                P_current[i][j] += alpha_c * P_current[i][j] +
-                        (1 - alpha_c) * P_Nsc[i][j];
-                P_current[i][j] /= 2;
-            }
-        }
-
-        // === 步骤4: 同步状态 ===
-        memcpy(P_Matrix, P_current, sizeof(P_Matrix));
-        memcpy(P_stable, P_current, sizeof(P_stable));
-
-        updateCoreVulnerability();
-
-        for (int i = 0; i < 256; i++) {
-            for (int j = 0; j < 256; j++) {
-                if (training && W_predict[i][j] < 0.01) {
-                    W_predict[i][j] = W_backup[i][j];
-                }
-            }
-        }
-
-        for (int i = 0; i < 256; i++) {
-            for (int j = 0; j < 256; j++) {
-                P_Matrix[i][j] = 0.9 * P_Matrix[i][j] + 0.1 * P_Original[i][j];
-            }
-        }
-
-        layerNorm(&P_Matrix[0][0], 256 * 256);
-     */
-
+trg:
+    double (*W_backup)[256];
+    double P_Original = n.P_Matrix[obj_x][obj_y];
+    if (n.training && port == 0 && obj_x == 0 && obj_y == 0) {
+        W_backup = new double[256][256];
+        memcpy(W_backup, n.W_predict, sizeof(n.W_predict));
+    }
     if (port == 0) {
         ll pos = n.local_coord[0] * n.GRID_SIZE * n.GRID_SIZE +
                  n.local_coord[1] * n.GRID_SIZE +
@@ -3029,6 +2786,7 @@ __global__ void step_inf(
             utt_overflow[neuron_id - 327460] = sum;
         }
     }
+    __shared__ double P_Nsc[256][256];
     __syncthreads();
     double x = 0;
     if (neuron_id / 4 / 256 < 256) {
@@ -3039,10 +2797,10 @@ __global__ void step_inf(
         x += utt_overflow[neuron_id - 327460];
     }
     x += n.M_KFE[obj_x][obj_y];
+    P_Nsc[obj_x][obj_y] = x;
     // GELU activation
     // P_Next[obj_x*obj_y] = 0.5 * x * (1.0 + tanh(0.797885 * (x + 0.044715 * x * x * x)));
     P_Next[obj_x * obj_y] = Neuron::gelu(x);
-ret:
     __shared__ double T_fixed[256][256];
     double alpha = 0.7;
     if (port == 0) {
@@ -3062,7 +2820,7 @@ ret:
         diff_norm = 0;
     }
     __syncthreads();
-    for (int ik = 1; ik <= 4; ik++) {
+    for (int ik = 1; ik <= 16; ik++) {
         double pcij = 0;
         if (neuron_id / 4 / 256 < 256) {
             pcij += temp_dta[neuron_id % 4][min(neuron_id / 4 / 256, 255ULL)][neuron_id % 256];
@@ -3072,11 +2830,8 @@ ret:
             pcij += utt_overflow[neuron_id - 327460];
         }
         __syncthreads();
-        int iter = port * ik - 1;
-        // 1. 基础修正项
+        int iter = (port + 1) * ik - 1;
         double V_corr = (T_fixed[obj_x][obj_y] - P_Next[obj_x * obj_y]) * eta_base;
-
-        // 2. 局部注意力调制
         double local_feature = 0.0;
         for (int p = 0; p < 4; p++) {
             if (!n.port_in[p].empty()) {
@@ -3085,11 +2840,8 @@ ret:
             }
         }
         local_feature /= 4.0;
-
         double attn_weight = 1.0 / (1.0 + exp(-(local_feature * P_Next[obj_x * obj_y])));
         double M_attn = attn_weight * V_corr;
-
-        // 3. 历史动量项
         double V_hist = 0.0;
         if (iter > 0) {
             for (int h = 1; h <= min(iter, 3); h++) {
@@ -3100,22 +2852,15 @@ ret:
                 V_hist += pow(lambda, h) * delta;
             }
         }
-
-        // 组合修正
         // DESTRUCTIVE!
         n.P_Matrix[obj_x][obj_y] = P_Next[obj_x * obj_y] + V_corr + M_attn + V_hist;
         __syncthreads();
-        // 检查收敛
         double diff = n.P_Matrix[obj_x][obj_y] - pcij;
         diff_norm += diff * diff;
         __syncthreads();
         diff_norm = sqrt(diff_norm);
-
-        // 更新历史
         history_index = (history_index + 1) % 5;
-
         n.P_history[history_index][obj_x][obj_y] = __float2half(pcij);
-
         double pcij1 = 0;
         if (neuron_id / 4 / 256 < 256) {
             pcij1 += temp_dta[neuron_id % 4][min(neuron_id / 4 / 256, 255ULL)][neuron_id % 256];
@@ -3124,22 +2869,328 @@ ret:
         } else if (utt_overflow != nullptr) {
             pcij1 += utt_overflow[neuron_id - 327460];
         }
-
-        // 早停
-        if (diff_norm < epsilon) {
+        if (diff_norm < epsilon)
             break;
-        }
-        if (iter > 8 && diff_norm > prev_diff_norm) {
-            // 开始震荡,停止
+        if (iter > 8 && diff_norm > prev_diff_norm)
             break;
-        }
         prev_diff_norm = diff_norm;
     }
+    __syncthreads();
+    __shared__ double beta_schedule[16];
+    __syncthreads();
+    if (port == 0 && obj_x == 0 && obj_y == 0) {
+        for (int t = 0; t < 16; t++) {
+            double alpha_t = cos(PI * t / 32.0);
+            beta_schedule[t] = 1.0 - alpha_t * alpha_t;
+        }
+        for (int t = 15; t >= 0; t--) {
+            double beta = beta_schedule[t];
+            double noise_pred[256][256];
+            n.predictNoise(P_Nsc, noise_pred);
+            for (int i = 0; i < 256; i++) {
+                for (int j = 0; j < 256; j++) {
+                    P_Nsc[i][j] -= sqrt(beta) * noise_pred[i][j];
+                    P_Nsc[i][j] = (P_Nsc[i][j] -
+                                   sqrt(beta) * noise_pred[i][j]) /
+                                  sqrt(1.0 - beta);
+                }
+            }
+        }
+    }
+    __syncthreads();
+    constexpr double alpha_c = 0.7;
+    n.P_Matrix[obj_x][obj_y] += alpha_c * n.P_Matrix[obj_x][obj_y] +
+            (1 - alpha_c) * P_Nsc[obj_x][obj_y];
+    n.P_Matrix[obj_x][obj_y] /= 2;
 
-
+    __syncthreads();
+    if (port == 0 && obj_x == 0 && obj_y == 0)
+        memcpy(n.P_stable, n.P_Matrix, sizeof(n.P_stable));
+    __syncthreads();
+    if (n.training && n.W_predict[obj_x][obj_y] < 0.01) {
+        n.W_predict[obj_x][obj_y] = W_backup[obj_x][obj_y];
+    }
+    __syncthreads();
+    __shared__ double deviat_num;
+    if (port == 0 && obj_x == 0 && obj_y == 0)
+        deviat_num = 0;
+    __syncthreads();
+    double diff = n.P_Matrix[obj_x][obj_y] - n.P_stable[obj_x][obj_y];
+    atomicAdd(&deviat_num,diff * diff);
+    __syncthreads();
+    if (port == 0 && obj_x == 0 & obj_y == 0) {
+        n.core_vulnerability = sqrt(deviat_num / (256.0 * 256.0));
+        n.core_vulnerability = tanh(n.core_vulnerability);
+    }
+    __syncthreads();
+    if (W_backup != nullptr && port == 0 && obj_x == 0 && obj_y == 0)
+        delete[] W_backup;
+    n.P_Matrix[obj_x][obj_y] = 0.9 * n.P_Matrix[obj_x][obj_y] + 0.1 * P_Original;
+    __syncthreads();
+    __shared__ double mean, var, std;
+    if (port == 0 && obj_x == 0 && obj_y == 0) {
+        mean = 0;
+        var = 0;
+    }
+    __syncthreads();
+    atomicAdd(&mean, n.P_Matrix[obj_x][obj_y]);
+    __syncthreads();
+    if (port == 0 && obj_x == 0 && obj_y == 0)
+        mean /= 256*256;
+    atomicAdd(&var, (n.P_Matrix[obj_x][obj_y] - mean) * (n.P_Matrix[obj_x][obj_y] - mean));
+    __syncthreads();
+    if (port == 0 && obj_x == 0 && obj_y == 0) {
+        var /= 256*256;
+        std = sqrt(var + 1e-6);
+    }
+    __syncthreads();
+    n.P_Matrix[obj_x][obj_y] = (n.P_Matrix[obj_x][obj_y] - mean) / std;
+    __syncthreads();
+    goto last;
 not_trg:
+    ull i = obj_x;;
+    ull j = obj_y;
+    alpha = 0.3;
+    double eta_micro = 0.05 + max(min(n.getLearningRate(3), 1.0), 0.0) * 0.0001;
+    double T_micro = alpha * __half2float(n.PS_aggregate[i][j]) +
+                                 (1.0 - alpha) * n.P_Matrix[i][j];
+    n.P_Matrix[i][j] += eta_micro * (T_micro - n.P_Matrix[i][j]);
+    n.P_Matrix[i][j] += max(min(n.noise, 1.0), 0.0) * 0.0001 * (Neuron::randomInRange(0, 1) - 0.5);
+    __syncthreads();
+last:
+    n.broadcastOutput();
+    if (port == 0 && obj_x < 4 && obj_y == 0) {
+        n.updateConvKernels(obj_x);
+    }
+}
+
+__device__ double warpReduceSum(double val) {
+    for (int offset = 16; offset > 0; offset /= 2) {
+        val += __shfl_down_sync(0xffffffff, val, offset);
+    }
+    return val;
+}
+
+__device__ ull warpReduceSum(ull val) {
+    for (int offset = 16; offset > 0; offset /= 2) {
+        val += __shfl_down_sync(0xffffffff, val, offset);
+    }
+    return val;
+}
+
+template<typename T>
+__device__ T* allocate(T* pool, ull &count, ull pool_size, ull request_size) {
+    ull idx = atomicAdd(&count, request_size);
+    if (idx >= pool_size) {
+        atomicAdd(&count, -request_size);
+        return nullptr;
+    }
+    return retpc<T*>(&pool[idx]);
+}
+
+template<typename T>
+__device__ void free(T* ptr, ull &count, ull size) {
+    atomicAdd(&count, -size);
+    for (ull i = 0; i < size; i++) {
+        ptr[i].~T();
+    }
+    memset(ptr, 0, sizeof(T) * size);
+    for (ull i = 0; i < size; i++) {
+        ptr[i] = T();
+    }
+}
+
+__global__ void step_optimized(
+    Neuron* neurons,
+    ull neuron_count,
+    double score,
+    double *double_memory_pool,
+    ull *ull_memory_pool,
+    half *half_memory_pool,
+    ull memory_pool_size
+    ) {
+    ull tid = blockIdx.x * blockDim.x + threadIdx.x;
+    ull lane = threadIdx.x % 32;
+    ull warp_id = threadIdx.x / 32;
+    if (blockIdx.x * blockDim.x >= neuron_count * 4) return;
+    ull neuron_id = (blockIdx.x * blockDim.x) / 4;
+    ull port = (blockIdx.x * blockDim.x) % 4;
+    Neuron &n = neurons[neuron_id];
+    __shared__ double As[16][16];
+    __shared__ double Bs[16][16];
+    __shared__ ull memory_pool_count_ull;
+    __shared__ ull memory_pool_count_double;
+    __shared__ ull memory_pool_count_half;
+    if (threadIdx.x == 0) {
+        memory_pool_count_ull = 0;
+        memory_pool_count_double = 0;
+        memory_pool_count_half = 0;
+    }
+    __syncthreads();
+    double input_matrix[256][256];
+    // Load input matrix from port
+    if (!n.port_in[port].empty()) {
+        NeuronInput inp = n.port_in[port].front();
+        input_matrix[tid / 256][tid % 256] = inp.array[tid / 256][tid % 256];
+    } else {
+        input_matrix[tid / 256][tid % 256] = 0.0;
+    }
+    __syncthreads();
+    __shared__ double *transformed_input;
+    if (threadIdx.x == 0) {
+        transformed_input = allocate<double>(double_memory_pool, memory_pool_count_double, memory_pool_size, 256 * 256);
+        if (transformed_input == nullptr) {
+            // Out of memory, skip processing
+            return;
+        }
+    }
+    double sum_glb = 0;
+    // 1024 threads per block
+    // 1024 / 32 = 32 warps
+    // 16 * 16 = 256 per tile
+    // 256 * 256 = 65536 elements
+    // 65536 / 256 = 256 tiles
+    // each warp process 8 tiles
+    // each tile is 16x16
+    // process 4 tiles per block/cycle
+    // 256 / 4 = 64 cycles
+    // 256 / 32 = 8 warps per tile
+    // 32 / 16 = 2 rows per warp
+    // each warp process 2 rows of 16 cols
+    for (int i = 0 ; i < 64 ; i++) {
+        // element position in tile
+        ull x_in_tile = threadIdx.x % 16;
+        ull y_in_tile = (threadIdx.x / 16) % 16;
+        // global element position
+        ull element_x = (i % 16) * 16 + x_in_tile;
+        ull element_y = (i / 16) * 16 + y_in_tile;
+        // load elements into shared memory
+        double element_a = input_matrix[element_x][element_y];
+        double element_b = n.P_Matrix[element_x][element_y];
+        As[y_in_tile][x_in_tile] = element_a;
+        Bs[y_in_tile][x_in_tile] = element_b;
+        // synchronize to make sure the matrices are loaded
+        __syncthreads();
+#pragma unroll
+        for (int k = 0 ; k < 16 ; k++) {
+            double sum = As[y_in_tile][k] * Bs[k][x_in_tile];
+            // warp reduce sum
+            sum = warpReduceSum(sum);
+            if (x_in_tile == 0 && y_in_tile == 0)
+                sum_glb += sum;
+        }
+        __syncthreads();
+        transformed_input[element_x * 256 + element_y] = sum_glb;
+        sum_glb = 0;
+    }
+    /*
+__device__ void processUpdate(int port) {
+        if (port_in[port].empty()) return;
+
+        NeuronInput curr_inp;
+        port_in[port].pop(curr_inp);
+        double weight_sum = 0.0;
+        for (int i = 0; i < 256; i++) {
+            for (int j = 0; j < 256; j++) {
+                PS_aggregate[i][j] = 0.0;
+            }
+        }
+        selectiveSSM();
+        for (int p = 0; p < 4; p++) {
+            if (!port_in[p].empty()) {
+                NeuronInput temp_inp = port_in[p].front();
+
+                double transformed_input[256][256];
+
+                matmul_double(&temp_inp.array[0][0], &input_multiplex_array[0][0][p],
+                              &transformed_input[0][0]);
+                extractConvFeatures(p, transformed_input);
+
+                double score = 0.0;
+                for (int i = 0; i < 256; i++) {
+                    for (int j = 0; j < 256; j++) {
+                        // Q = P_Matrix[i][j]
+                        // K = all_inputs[k]
+                        score += P_Matrix[i][j] * transformed_input[i][j];
+                    }
+                }
+                score /= sqrt(256.0 * 256.0);
+
+                double aggregated[256][256];
+                aggregateFeatures(p, aggregated);
+
+                double w = temp_inp.weight * temp_inp.activity;
+                weight_sum += w;
+
+                for (int i = 0; i < 256; i++) {
+                    double wkv = 0.0;
+                    double state = h_state[i];
+                    for (int j = 0; j < 256; j++) {
+                        double k = PS_aggregate[i][j]; // key
+                        double v = PS_aggregate[i][j]; // value
+                        double w = -exp(time_decay[i]);
+                        //wkv compute
+                        wkv += exp(__half2float(time_first[i]) + k) * v;
+                        state = state * exp(w) + exp(k) * v;
+                        PS_aggregate[i][j] += transformed_input[i][j] * w * aggregated[i][j] * score + wkv / (
+                            wkv + state);
+                    }
+                }
+            }
+        }
+
+        // normalize
+        if (weight_sum > 1e-6) {
+            for (int i = 0; i < 256; i++) {
+                for (int j = 0; j < 256; j++) {
+                    PS_aggregate[i][j] /= weight_sum;
+                }
+            }
+        }
+
+        // deviation
+        for (int i = 0; i < 256; i++) {
+            for (int j = 0; j < 256; j++) {
+                Deviation[i][j] = __half2float(PS_aggregate[i][j]) - P_stable[i][j];
+            }
+        }
+        STM_aggregate_utility = computeKFEAttention();
+
+        bool trigger_gemm = false;
+        if (cycle_counter % 16 == 0) {
+            trigger_gemm = true;
+        }
+        double deviation_norm = 0.0;
+        for (int i = 0; i < 256; i++) {
+            for (int j = 0; j < 256; j++) {
+                deviation_norm += Deviation[i][j] * Deviation[i][j];
+            }
+        }
+        deviation_norm = sqrt(deviation_norm / (256.0 * 256.0));
+        if (deviation_norm > 0.5) {
+            trigger_gemm = true;
+        }
+        if (core_vulnerability > 0.7) {
+            trigger_gemm = true;
+        }
+        if (STM_aggregate_utility > 0.6) {
+            trigger_gemm = true;
+        }
+
+        if (trigger_gemm) {
+            executeGEMMAndDRC();
+        } else {
+            executeMicroCorrection();
+        }
 
 
+        broadcastOutput();
+
+        for (int p = 0; p < 4; p++) {
+            updateConvKernels(p);
+        }
+    }
+     */
 
 }
 
