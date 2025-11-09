@@ -42,6 +42,8 @@ find_package(CUDAToolkit REQUIRED)
 
 set(CMAKE_CUDA_ARCHITECTURES native)
 set(CMAKE_CUDA_STANDARD 20)
+set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
 
 if (CUDAToolkit_FOUND)
     message(STATUS "🎯 CUDA: ${CUDAToolkit_VERSION}")
@@ -103,6 +105,7 @@ add_library(src SHARED
         semantic_query_engine.h
         training_interval.cu
         gpu_containers.cuh
+        NeuronOptimize.cu
 )
 
 # =============================================================================
@@ -121,6 +124,11 @@ target_compile_definitions(src
         #CUTLASS_AVAILABLE
         CROW_STANDALONE_ASIO
         $<$<NOT:$<BOOL:${LZMA_LIBRARY}>>:NO_LZMA_SUPPORT>
+)
+
+target_compile_definitions(src
+        PRIVATE
+        USE_OPTIMIZED_KERNELS
 )
 
 # =============================================================================

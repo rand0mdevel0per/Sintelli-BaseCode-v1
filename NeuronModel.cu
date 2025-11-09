@@ -28,6 +28,10 @@
 #include "huggingface_rag_integration.cpp"
 #include <queue>
 
+#ifdef USE_OPTIMIZED_KERNELS
+#include "NeuronOptimize.cu"
+#endif
+
 #define ll long long
 #define ull unsigned ll
 
@@ -82,6 +86,19 @@ public:
                 queues[i][j].resize(GRID_SIZE);
             }
         }
+
+#ifdef USE_OPTIMIZED_KERNELS
+        cudaMalloc(&d_kvc, NEURON_COUNT * sizeof(KVCache));
+        h_kvc.resize(NEURON_COUNT);
+        for (ull i = 0; i < NEURON_COUNT; i++) {
+            h_kvc[i].max_len = 512;
+            h_kvc[i].seq_len = 0;
+            cudaMalloc(&h_kvc[i].k_cache, 512 * 256 * sizeof(half));
+            cudaMalloc(&h_kvc[i].v_cache, 512 * 256 * sizeof(half));
+            cudaMemset(h_kvc[i].k_cache, 0, 512 * 256 * sizeof(half));
+            cudaMemset(h_kvc[i].v_cache, 0, 512 * 256 * sizeof(half));
+        }
+#endif
 
         cudaMalloc(&d_active_flags, NEURON_COUNT * sizeof(bool));
         for (int i = 0; i < 4; i++) {
@@ -400,7 +417,8 @@ public:
         // Inject matching Logic into neuron
         for (const auto &[logic_id, neuron_input]: activated_logics) {
             if (neuron_index >= 0 && neuron_index < GRID_SIZE * GRID_SIZE * GRID_SIZE) {
-                injectNeuronKernel<<<1, 1>>>(d_neurons, neuron_input, neuron_index, port); cudaDeviceSynchronize();
+                injectNeuronKernel<<<1, 1>>>(d_neurons, neuron_input, neuron_index, port);
+                cudaDeviceSynchronize();
                 std::cout << "Injecting Logic: " << logic_id << " to neuron " << neuron_index
                         << " port " << port << std::endl;
             }
@@ -447,7 +465,8 @@ public:
                 img_inp.from_coord[1] = 0;
                 img_inp.from_coord[2] = 0;
                 img_inp.weight = 1.0;
-                injectNeuronKernel<<<1, 1>>>(d_neurons, img_inp, 0, 1); cudaDeviceSynchronize();
+                injectNeuronKernel<<<1, 1>>>(d_neurons, img_inp, 0, 1);
+                cudaDeviceSynchronize();
             }
             if (msg.has_text) {
                 processTextString(&processor, "<User:" + role + "> " + msg.text);
@@ -592,7 +611,6 @@ public:
     ~NeuronModel() {
         std::cout << "Shutting down neuron network..." << std::endl;
         this->stop();
-        // 等待所有流完成
         for (const auto &stream: streams) {
             cudaStreamSynchronize(stream);
         }
@@ -605,6 +623,14 @@ public:
             }
             cudaFree(d_neurons);
             d_neurons = nullptr;
+#ifdef USE_OPTIMIZED_KERNELS
+            // clear
+            for (auto &kvc : h_kvc) {
+                cudaFree(kvc.k_cache);
+                cudaFree(kvc.v_cache);
+            }
+            cudaFree(d_kvc);
+#endif
         }
     }
 
@@ -777,7 +803,7 @@ private:
     ull NEURON_COUNT = 0; // Will be initialized in constructor
     ull THREADS_PER_BLOCK = 256;
     ull NUM_BLOCKS = 0; // Will be initialized in constructor
-    std::vector<std::vector<std::vector<DeviceQueue<Message, 32> > > > queues; // 使用vector代替固定数组
+    std::vector<std::vector<std::vector<DeviceQueue<Message, 32> > > > queues;
     Neuron *d_neurons{};
     ExternalStorage<KFE_STM_Slot> ext_kfe{};
     SemanticConversationTree sct{};
@@ -792,6 +818,11 @@ private:
     std::vector<std::string> current_logic;
     std::queue<std::string> cache_queue;
     std::string output_cache = "<You> ";
+
+#ifdef USE_OPTIMIZED_KERNELS
+    KVCache *d_kvc;
+    std::vector<KVCache> h_kvc;
+#endif
 
     // 语义匹配相关成员
     std::unique_ptr<FeatureExtractor> feature_extractor;
@@ -903,7 +934,8 @@ private:
                         logic_inp.from_coord[1] = 0;
                         logic_inp.from_coord[2] = 0;
                         logic_inp.weight = 1.0;
-                        injectNeuronKernel<<<1, 1>>>(d_neurons, logic_inp, 4, i); cudaDeviceSynchronize();
+                        injectNeuronKernel<<<1, 1>>>(d_neurons, logic_inp, 4, i);
+                        cudaDeviceSynchronize();
                     }
                 }
             }
@@ -919,7 +951,8 @@ private:
                         sct_inp.from_coord[1] = 0;
                         sct_inp.from_coord[2] = 0;
                         sct_inp.weight = 1.0;
-                        injectNeuronKernel<<<1, 1>>>(d_neurons, sct_inp, 5, i); cudaDeviceSynchronize();
+                        injectNeuronKernel<<<1, 1>>>(d_neurons, sct_inp, 5, i);
+                        cudaDeviceSynchronize();
                     }
                 }
             }
@@ -935,7 +968,8 @@ private:
                         memory_inp.from_coord[1] = 0;
                         memory_inp.from_coord[2] = 0;
                         memory_inp.weight = 1.0;
-                        injectNeuronKernel<<<1, 1>>>(d_neurons, memory_inp, 6, i); cudaDeviceSynchronize();
+                        injectNeuronKernel<<<1, 1>>>(d_neurons, memory_inp, 6, i);
+                        cudaDeviceSynchronize();
                     }
                 }
             }
@@ -951,7 +985,8 @@ private:
                         cache_inp.from_coord[1] = 0;
                         cache_inp.from_coord[2] = 0;
                         cache_inp.weight = 1.0;
-                        injectNeuronKernel<<<1, 1>>>(d_neurons, cache_inp, 11, i); cudaDeviceSynchronize();
+                        injectNeuronKernel<<<1, 1>>>(d_neurons, cache_inp, 11, i);
+                        cudaDeviceSynchronize();
                     }
                 }
             }
@@ -960,6 +995,7 @@ private:
                 next_inject_mt = nullptr;
             }
             // Divide 32768 neurons into 4 groups, each using one stream
+#ifndef USE_OPTIMIZED_KERNELS
             ull neurons_per_stream = NEURON_COUNT / 4;
 
             for (int i = 0; i < 4; i++) {
@@ -973,6 +1009,26 @@ private:
                     count
                 );
             }
+#else
+            cudaMemcpy(d_kvc, h_kvc.data(), NEURON_COUNT * sizeof(KVCache),
+                       cudaMemcpyHostToDevice);
+            size_t pool_size = NEURON_COUNT * 256 * 256 * 16;
+            double *d_pool;
+            cudaMalloc(&d_pool, pool_size * sizeof(double));
+            cudaMemset(d_pool, 0, pool_size * sizeof(double));
+            ull blocks = NEURON_COUNT * 4;
+            ull threads = 1024;
+            ull neurons_per_stream = NEURON_COUNT / 4;
+            for (int i = 0; i < 4; i++) {
+                ull offset = i * neurons_per_stream;
+                ull count = (i == 3) ? (NEURON_COUNT - offset) : neurons_per_stream;
+                // Asynchronous launch (no waiting)
+                step_complete_fusion<<<blocks, threads, 0, streams[i]>>>(
+                    d_neurons + offset, NEURON_COUNT, score,
+                    d_kvc + offset, d_pool + offset, pool_size, d_active_flags + offset
+                );
+            }
+#endif
             memcpy(previous_matrix.data, current_matrix.data, sizeof(previous_matrix.data));
             memcpy(current_matrix.data, d_neurons[1].detach(0).array, sizeof(current_matrix.data));
             memcpy(previous_matrix_0.data, current_matrix_0.data, sizeof(previous_matrix_0.data));
@@ -1189,15 +1245,19 @@ private:
             }
             ull neuron_count = GRID_SIZE ^ 3;
             int threads_per_block = 256;
-            ull blocks = (neuron_count + threads_per_block - 1) / threads_per_block;
-
-            // 启动kernel
+            blocks = (neuron_count + threads_per_block - 1) / threads_per_block;
             update_activity<<<blocks, threads_per_block>>>(d_neurons, d_active_flags, d_trace, score, training);
+            if (training) {
+                apply_trace_to_neurons<<<blocks, threads_per_block>>>(d_neurons, d_trace, score, neuron_count);
+                update_ema_baseline<<<1,1>>>(score);
+            }
             std::this_thread::sleep_for(std::chrono::nanoseconds(100));
-            // 等待所有流完成
             for (int i = 0; i < 4; i++) {
                 cudaStreamSynchronize(streams[i]);
             }
+#ifdef USE_OPTIMIZED_KERNELS
+            cudaFree(d_pool);
+#endif
         }
     }
 
