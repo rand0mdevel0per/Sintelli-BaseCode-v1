@@ -20,7 +20,10 @@ if (MSVC)
     add_compile_options(/Zm200)
 endif()
 
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler=\"/Zm200 /bigobj /utf-8\" -v -allow-unsupported-compiler")
+if (MSVC)
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler=\"/Zm200 /bigobj /utf-8\" -v -allow-unsupported-compiler")
+endif()
+
 set(CMAKE_VERBOSE_MAKEFILE ON)
 set_property(GLOBAL PROPERTY RULE_MESSAGES ON)
 
