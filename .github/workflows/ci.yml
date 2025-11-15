@@ -31,7 +31,7 @@ jobs:
       - name: Install Build Tools
         run: |
           apt-get update
-          apt-get install -y cmake ninja-build git
+          apt-get install -y cmake ninja-build git curl zip unzip tar
 
       - name: Setup vcpkg
         run: |
@@ -94,16 +94,16 @@ jobs:
         with:
           cuda: ${{ env.CUDA_VERSION }}
 
+      - name: Install Dependencies
+        shell: powershell
+        run: |
+          choco install ninja git --no-progress
+
       - name: Setup vcpkg
         run: |
           git clone https://github.com/microsoft/vcpkg.git C:\vcpkg
           C:\vcpkg\bootstrap-vcpkg.bat
           echo "VCPKG_ROOT=C:\vcpkg" >> $env:GITHUB_ENV
-
-      - name: Install Ninja
-        shell: powershell
-        run: |
-          choco install ninja --no-progress
 
       - name: Configure and Build Package
         shell: powershell
@@ -143,7 +143,7 @@ jobs:
       - name: Install Build Tools
         run: |
           apt-get update
-          apt-get install -y cmake ninja-build
+          apt-get install -y cmake ninja-build git curl zip unzip tar
 
       - name: Setup vcpkg
         run: |
