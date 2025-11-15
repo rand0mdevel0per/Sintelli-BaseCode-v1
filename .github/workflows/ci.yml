@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 env:
-  CUDA_VERSION: "12.3"
+  CUDA_VERSION: "13.0.2"
   PYTHON_VERSION: "3.11"
 
 jobs:
@@ -35,7 +35,7 @@ jobs:
           sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 100
 
       - name: Install CUDA
-        uses: Jimver/cuda-toolkit@v0.2.14
+        uses: Jimver/cuda-toolkit@master
         with:
           cuda: ${{ env.CUDA_VERSION }}
 
@@ -101,7 +101,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install CUDA
-        uses: Jimver/cuda-toolkit@v0.2.14
+        uses: Jimver/cuda-toolkit@master
         with:
           cuda: ${{ env.CUDA_VERSION }}
 
@@ -158,7 +158,7 @@ jobs:
           sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 100
 
       - name: Install CUDA
-        uses: Jimver/cuda-toolkit@v0.2.14
+        uses: Jimver/cuda-toolkit@master
         with:
           cuda: ${{ env.CUDA_VERSION }}
 
