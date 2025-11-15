@@ -70,7 +70,7 @@ endif ()
 
 find_package(Threads REQUIRED)
 find_package(ZeroMQ CONFIG REQUIRED)
-find_package(curl CONFIG REQUIRED)
+find_package(CURL CONFIG REQUIRED)
 
 # LZMA Configuration
 find_path(LZMA_INCLUDE_DIR lzma.h)
