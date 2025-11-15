@@ -1,56 +1,15 @@
-//
-// Created by ASUS on 9/29/2025.
-//
+/**
+ * @file deviceQueue.cu
+ * @brief CUDA device-side queue implementation
+ * @date Created on 9/29/2025
+ */
 
 #ifndef CUDA_DEVICE_QUEUE_CUH
 #define CUDA_DEVICE_QUEUE_CUH
 
 #include <cuda_runtime.h>
 #include <device_atomic_functions.h>
-#include <intrin0.inl.h>
-
-#define ll long long
-#define ull unsigned ll
-
-ull atomic_add_ull_builtin(ull *ptr, ull value) {
-#if defined(__GNUC__) || defined(__clang__)
-    // GCC/Clang
-    return __sync_fetch_and_add(ptr, value);
-#elif defined(_MSC_VER)
-    // MSVC
-#ifdef _WIN64
-    return _InterlockedExchangeAdd64(reinterpret_cast<__int64 *>(ptr), static_cast<__int64>(value));
-#else
-    // WIN32
-    return _InterlockedExchangeAdd64((__int64 *) ptr, (__int64) value);
-#endif
-#else
-#warning "Using fallback atomic implementation"
-    return __sync_fetch_and_add(ptr, value);
-#endif
-}
-#ifndef __CUDA_ARCH__
-ull atomicAdd_(ull *ptr, ull value) {
-    return atomic_add_ull_builtin(ptr, static_cast<__int64>(value));
-}
-
-#define atomicAdd atomicAdd_
-#endif
-
-__device__ __forceinline__ unsigned long long atomicSubULL(unsigned long long* address, unsigned long long val) {
-#ifdef __CUDA_ARCH__
-    unsigned long long old = atomicCAS(address, 0ULL, 0ULL);
-    unsigned long long assumed;
-    do {
-        assumed = old;
-        unsigned long long newval = assumed - val; // 无符号减法（模 2^64）
-        old = atomicCAS(address, assumed, newval);
-    } while (old != assumed);
-    return old;
-#else
-    return 0;
-#endif
-}
+#include "atomic_utils.cuh"
 
 
 template<typename T, int CAPACITY>

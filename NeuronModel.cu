@@ -1,8 +1,10 @@
-//
-// Created by ASUS on 10/3/2025.
-//
-// NeuronModel template class for managing 3D grid of neurons
-// This class handles neuron allocation and inter-neuron connectivity
+/**
+ * @file NeuronModel.cu
+ * @brief NeuronModel template class for managing 3D grid of neurons
+ * @date Created on 10/3/2025
+ * 
+ * This class handles neuron allocation and inter-neuron connectivity
+ */
 
 #ifndef SRC_NEURONMODEL_CUH
 #define SRC_NEURONMODEL_CUH
@@ -11,22 +13,25 @@
 #include <cuda_runtime.h>
 #include <thread>
 #include <mutex>
+#include <queue>
+#include <Windows.h>
+
+// Core utility headers
+#include "atomic_utils.cuh"
+#include "structs.cuh"
+#include "memory_slot.cuh"
+
+// Semantic processing headers
 #include "isw.cuh"
 #include "sct.cuh"
 #include "dslzma.h"
-#include "smry.cu"
 #include "feature_extractor.cuh"
 #include "semantic_matcher.cuh"
 #include "semantic_query_interface.cuh"
-#include "semantic_matcher.cu"
-#include "structs.cuh"  // Contains KFE_STM_Slot definition
-#include "deviceQueue.cu"  // Contains DeviceQueue template definition
-#include "KFEManager.cuh"    // KFE storage manager
-#include "memory_slot.cuh"
-#include <Windows.h>
-#include "rag_knowledge_loader.cu"
+#include "KFEManager.cuh"
+
+// External libraries
 #include "huggingface_rag_integration.cpp"
-#include <queue>
 
 #ifdef USE_OPTIMIZED_KERNELS
 #include "NeuronOptimize.cu"

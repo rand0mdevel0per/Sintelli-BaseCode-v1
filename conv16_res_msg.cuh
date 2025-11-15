@@ -1,38 +1,18 @@
+/**
+ * @file conv16_res_msg.cuh
+ * @brief 16x16 Convolution kernel and residual message structures
+ */
+
 #ifndef CONV16_RESIDUAL_MESSAGE_H
 #define CONV16_RESIDUAL_MESSAGE_H
 
 #include <cuda_runtime.h>
 #include <curand_kernel.h>
 #include <cmath>
+#include "atomic_utils.cuh"
 
 
-ull atomic_add_ull_builtin_(ull *ptr, ull value) {
-#if defined(__GNUC__) || defined(__clang__)
-    // GCC/Clang
-    return __sync_fetch_and_add(ptr, value);
-#elif defined(_MSC_VER)
-    // MSVC
-#ifdef _WIN64
-    return _InterlockedExchangeAdd64(reinterpret_cast<__int64 *>(ptr), static_cast<__int64>(value));
-#else
-    // WIN32
-    return _InterlockedExchangeAdd64((__int64 *) ptr, (__int64) value);
-#endif
-#else
-#warning "Using fallback atomic implementation"
-    return __sync_fetch_and_add(ptr, value);
-#endif
-}
-#ifndef __CUDA_ARCH__
-ull atomicAdd__(ull *ptr, ull value) {
-    return atomic_add_ull_builtin_(ptr, static_cast<__int64>(value));
-}
-
-#define atomicAdd atomicAdd__
-#endif
-
-
-// ===== 16×16卷积核 =====
+// ===== 16×16 Convolution Kernel =====
 struct ConvKernel16 {
     double kernel[16][16];
     double bias;
