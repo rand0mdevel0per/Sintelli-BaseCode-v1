@@ -44,7 +44,8 @@ jobs:
           mkdir build
           cd build
           cmake .. -DCMAKE_TOOLCHAIN_FILE="/opt/vcpkg/scripts/buildsystems/vcpkg.cmake" \
-               -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -G Ninja
+               -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -G Ninja \
+               -DPython3_EXECUTABLE=/usr/bin/python3
           cp ./compile_commands.json ../compile_commands.json
 
       - name: Install Clang-Tidy
@@ -113,7 +114,7 @@ jobs:
 
           cmake .. -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake" `
                    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON `
-                   -G Ninja "
+                   -G Ninja
 
           cmake --build . --target src -j 24
 
@@ -157,7 +158,8 @@ jobs:
           cd build
 
           cmake .. -DCMAKE_TOOLCHAIN_FILE="/opt/vcpkg/scripts/buildsystems/vcpkg.cmake" \
-               -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -G Ninja"
+               -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -G Ninja \
+               -DPython3_EXECUTABLE=/usr/bin/python3
 
           cmake --build . --target src -j 24
 
