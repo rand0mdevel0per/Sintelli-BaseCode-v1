@@ -61,7 +61,7 @@ jobs:
 
       - name: Install Clang-Tidy
         run: |
-          pip install clang-tidy
+          python -m pip install clang-tidy
 
       - name: Run Clang-Tidy
         run: |
