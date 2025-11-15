@@ -61,13 +61,12 @@ jobs:
 
       - name: Install Clang-Tidy
         run: |
-          apt-get update
-          apt-get install -y clang-tidy-16
+          pip install clang-tidy
 
       - name: Run Clang-Tidy
         run: |
           find src -name "*.cu" -o -name "*.cpp" | \
-            xargs clang-tidy-16 -p . \
+            xargs clang-tidy -p . \
             --checks='bugprone-*,performance-*' \
             --warnings-as-errors='' \
             > clang-tidy-report.txt || true
