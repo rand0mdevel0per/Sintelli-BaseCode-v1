@@ -31,7 +31,14 @@ jobs:
       - name: Install Build Tools
         run: |
           apt-get update
-          apt-get install -y cmake ninja-build git curl zip unzip tar pkg-config
+          apt-get install -y cmake ninja-build git curl zip unzip tar pkg-config python3.11 python3.11-venv python3.11-dev
+          update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
+          apt-get clean
+
+      - name: Verify Python Installation
+        run: |
+          python3 --version
+          python3 -c "import sysconfig; print('Python sysconfig imported successfully')"
 
       - name: Setup vcpkg
         run: |
@@ -144,7 +151,14 @@ jobs:
       - name: Install Build Tools
         run: |
           apt-get update
-          apt-get install -y cmake ninja-build git curl zip unzip tar pkg-config
+          apt-get install -y cmake ninja-build git curl zip unzip tar pkg-config python3.11 python3.11-venv python3.11-dev
+          update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
+          apt-get clean
+
+      - name: Verify Python Installation
+        run: |
+          python3 --version
+          python3 -c "import sysconfig; print('Python sysconfig imported successfully')"
 
       - name: Setup vcpkg
         run: |
