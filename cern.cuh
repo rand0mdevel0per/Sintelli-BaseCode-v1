@@ -1,6 +1,7 @@
 //
 // Created by ASUS on 10/2/2025.
 //
+#pragma once
 
 #ifndef SRC_CERN_CUH
 #define SRC_CERN_CUH

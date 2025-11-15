@@ -1,11 +1,19 @@
+/**
+ * @file conv16_res_msg.cuh
+ * @brief 16x16 Convolution kernel and residual message structures
+ */
+#pragma once
+
 #ifndef CONV16_RESIDUAL_MESSAGE_H
 #define CONV16_RESIDUAL_MESSAGE_H
 
 #include <cuda_runtime.h>
 #include <curand_kernel.h>
 #include <cmath>
+#include "atomic_utils.cuh"
 
-// ===== 16×16卷积核 =====
+
+// ===== 16×16 Convolution Kernel =====
 struct ConvKernel16 {
     double kernel[16][16];
     double bias;
@@ -216,8 +224,8 @@ private:
         uint64_t last_access_time;
     };
 
-    __managed__ Block blocks[MAX_BLOCKS] = {};
-    __managed__ int free_count = 0;
+    Block blocks[MAX_BLOCKS] = {};
+    ull free_count = 0;
 
 public:
     __host__ void initialize() {
@@ -236,7 +244,7 @@ public:
             if (!blocks[i].in_use) {
                 blocks[i].in_use = true;
                 blocks[i].ref_count = 1;
-                atomicSub(&free_count, 1);
+                atomicAdd(&free_count, -1ULL);
                 return i;
             }
         }
@@ -245,11 +253,12 @@ public:
 
     __device__ void addRef(int block_id) {
         if (block_id >= 0 && block_id < MAX_BLOCKS) {
-            atomicAdd(&blocks[block_id].ref_count, 1);
+            _InterlockedExchangeAdd64(reinterpret_cast<__int64 *>(&blocks[block_id].ref_count), 1);
         }
     }
 
     __device__ void release(int block_id) {
+#ifdef __CUDA_ARCH__
         if (block_id >= 0 && block_id < MAX_BLOCKS) {
             int old_count = atomicSub(&blocks[block_id].ref_count, 1);
             if (old_count == 1) {
@@ -257,6 +266,7 @@ public:
                 atomicAdd(&free_count, 1);
             }
         }
+#endif
     }
 
     __device__ double* get(int block_id) {
@@ -266,7 +276,7 @@ public:
         return nullptr;
     }
 
-    __device__ int getFreeCount() {
+    __device__ ull getFreeCount() const {
         return free_count;
     }
 
@@ -278,7 +288,7 @@ public:
 };
 
 // ===== 全局统一内存池实例 =====
-__managed__ UnifiedMemoryPool global_memory_pool;
+__device__ UnifiedMemoryPool global_memory_pool;
 
 // ===== Convolution and Residual Processing =====
 /**
@@ -386,8 +396,8 @@ public:
                 double fj = j / 32.0;
                 int i0 = (int)fi;
                 int j0 = (int)fj;
-                int i1 = min(i0 + 1, 7);
-                int j1 = min(j0 + 1, 7);
+                int i1 = std::min(i0 + 1, 7);
+                int j1 = std::min(j0 + 1, 7);
 
                 double wi = fi - i0;
                 double wj = fj - j0;
@@ -460,9 +470,9 @@ public:
 // ===== 消息编码器 =====
 class MessageEncoder {
 private:
-    ConvKernel16 conv_kernel;
-    __declspec(__managed__) double reconstruction_error_history[100];
-    __declspec(__managed__) int error_index;
+    ConvKernel16 conv_kernel = {};
+    double reconstruction_error_history[100] = {};
+    int error_index = 0;
 
 public:
     __device__ void initialize(curandStatePhilox4_32_10_t* rand_state) {

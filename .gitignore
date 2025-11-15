@@ -2,6 +2,10 @@
 build/
 cmake-build-*/
 test-build/
+build-*/
+
+#scripts
+*.ps1
 
 # IDE files
 .idea/
@@ -13,7 +17,7 @@ test-build/
 # External libraries (already managed by vcpkg)
 cutlass/
 json/
-#tokenizers/
+tokenizers/
 onnx/
 
 # vcpkg installed dependencies
@@ -44,7 +48,7 @@ cmake_install.cmake
 *.cmake
 
 # Compilation databases
-compile_commands.json
+build/compile_commands.json
 
 # Logs and temporary files
 *.log
@@ -53,3 +57,16 @@ compile_commands.json
 progress.md
 progress.archieve.md
 IFLOW.md
+progress.archive.md
+
+@"
+# Build
+*.pdb
+*.ipdb
+
+# vcpkg
+
+# Python
+__pycache__/
+*.pyc
+"@ | Out-File -Encoding UTF8 .gitignore -Append

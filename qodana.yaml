@@ -1,0 +1,40 @@
+# qodana.yaml
+version: "1.0"
+linter: jetbrains/qodana-clang:2025.2-eap
+
+profile:
+  name: qodana.starter
+include:
+  - name: abseil-cleanup-ctad
+  - name: abseil-duration-addition
+  - name: abseil-duration-comparison
+  - name: abseil-duration-conversion-cast
+  - name: abseil-duration-division
+  - name: abseil-duration-factory-float
+  - name: abseil-duration-factory-scale
+  - name: abseil-duration-subtraction
+  - name: abseil-duration-unnecessary-conversion
+  - name: abseil-faster-strsplit-delimiter
+  - name: abseil-no-internal-dependencies
+  - name: abseil-no-namespace
+  - name: abseil-redundant-strcat-calls
+  - name: abseil-str-cat-append
+  - name: abseil-string-find-startswith
+  - name: abseil-string-find-str-contains
+  - name: abseil-time-comparison
+  - name: abseil-time-subtraction
+  - name: abseil-upgrade-duration-conversions
+  - name: zircon-temporary-objects
+
+
+inspections:
+  - name: ClangTidy
+    enabled: true
+  - name: CppDFAMemoryLeak
+    enabled: true
+  - name: UnusedGlobalDeclaration
+    enabled: true
+  - name: UnusedLocalVariable
+    enabled: true
+
+failThreshold: 0

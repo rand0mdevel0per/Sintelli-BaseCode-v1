@@ -1,6 +1,7 @@
 //
 // Created by ASUS on 10/3/2025.
 //
+#pragma once
 
 #ifndef VECTOR_SIMILARITY_CUH
 #define VECTOR_SIMILARITY_CUH

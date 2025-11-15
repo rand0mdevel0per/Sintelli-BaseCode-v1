@@ -1,8 +1,11 @@
-//
-// Created by ASUS on 10/3/2025.
-//
-// NeuronModel template class for managing 3D grid of neurons
-// This class handles neuron allocation and inter-neuron connectivity
+/**
+ * @file NeuronModel.cu
+ * @brief NeuronModel template class for managing 3D grid of neurons
+ * @date Created on 10/3/2025
+ * 
+ * This class handles neuron allocation and inter-neuron connectivity
+ */
+#pragma once
 
 #ifndef SRC_NEURONMODEL_CUH
 #define SRC_NEURONMODEL_CUH
@@ -11,25 +14,30 @@
 #include <cuda_runtime.h>
 #include <thread>
 #include <mutex>
-#include "isw.hpp"
-#include "sct.hpp"
-#include "dslzma.h"
-#include "smry.cpp"
-#include "feature_extractor.h"
-#include "semantic_matcher.h"
-#include "semantic_query_interface.h"
-#include "semantic_matcher.cpp"
-#include "structs.h"  // Contains KFE_STM_Slot definition
-#include "deviceQueue.cpp"  // Contains DeviceQueue template definition
-#include "KFEManager.h"    // KFE storage manager
-#include "memory_slot.h"
-#include <Windows.h>
-#include "rag_knowledge_loader.cpp"
-#include "huggingface_rag_integration.cpp"
 #include <queue>
+#include <Windows.h>
+
+// Core utility headers
+#include "structs.cuh"
+#include "memory_slot.cuh"
+
+// Semantic processing headers
+#include "isw.cuh"
+#include "sct.cuh"
+#include "dslzma.h"
+#include "feature_extractor.cuh"
+#include "semantic_matcher.cuh"
+#include "KFEManager.cuh"
+
+// External libraries
+#include "rag_knowledge_loader.cuh"
+
+#ifdef USE_OPTIMIZED_KERNELS
+#include "NeuronOptimize.cu"
+#endif
 
 #define ll long long
-#define ull unsigned ll
+#define ull unsigned long long
 
 // Forward declaration of NeuronModel class
 class NeuronModel;
@@ -64,11 +72,19 @@ public:
      * Initializes all required subsystems including E5 model, feature extractors, and storage.
      * @param grid_size Size of the 3D neuron grid (grid_size x grid_size x grid_size)
      */
-    NeuronModel(ull grid_size) : processor(e5), logic_processor(e5), memory_processor(e5), sct_processor(e5),
-                                 cache_processor(e5) {
+    explicit NeuronModel(ull grid_size) : streams(), d_active_flags(nullptr), d_trace(nullptr), processor(e5),
+                                          d_kvc(nullptr), logic_processor(e5), memory_processor(e5), sct_processor(e5),
+                                          cache_processor(e5), score(0), training(false) {
         if (grid_size != 0) {
             GRID_SIZE = grid_size;
         }
+
+        int device;
+        cudaGetDevice(&device);
+        cudaDeviceProp prop{};
+        cudaGetDeviceProperties(&prop, device);
+        printf("[Info] Device: %s\n", prop.name);
+        printf("[Info] Compute Capability: %d.%d\n", prop.major, prop.minor);
 
         // Initialize computation-related constants
         NEURON_COUNT = GRID_SIZE * GRID_SIZE * GRID_SIZE;
@@ -83,9 +99,22 @@ public:
             }
         }
 
+#ifdef USE_OPTIMIZED_KERNELS
+        cudaMalloc(&d_kvc, NEURON_COUNT * sizeof(KVCache));
+        h_kvc.resize(NEURON_COUNT);
+        for (ull i = 0; i < NEURON_COUNT; i++) {
+            h_kvc[i].max_len = 512;
+            h_kvc[i].seq_len = 0;
+            cudaMalloc(&h_kvc[i].k_cache, 512 * 256 * sizeof(half));
+            cudaMalloc(&h_kvc[i].v_cache, 512 * 256 * sizeof(half));
+            cudaMemset(h_kvc[i].k_cache, 0, 512 * 256 * sizeof(half));
+            cudaMemset(h_kvc[i].v_cache, 0, 512 * 256 * sizeof(half));
+        }
+#endif
+
         cudaMalloc(&d_active_flags, NEURON_COUNT * sizeof(bool));
-        for (int i = 0; i < 4; i++) {
-            cudaStreamCreate(&streams[i]);
+        for (auto & stream : streams) {
+            cudaStreamCreate(&stream);
         }
 
         // Initialize: all activated
@@ -127,7 +156,7 @@ public:
 
         // Create KFE storage queues (shared by all neurons)
         static DeviceQueue<KFE_STM_Slot, 32> kfe_storage_queue;
-        static DeviceQueue<std::string, 32> kfe_query_queue;
+        static DeviceQueue<GPUString, 32> kfe_query_queue;
         static DeviceQueue<KFE_STM_Slot, 32> kfe_result_queue;
 
         // Start KFE manager
@@ -183,15 +212,16 @@ public:
             new(&d_neurons[idx]) Neuron(neighbour_q, coord, seed, &queues[x][y][z],
                                         &kfe_storage_queue, &kfe_query_queue, &kfe_result_queue);
             // placement new
+            d_neurons[idx].set_size(GRID_SIZE);
         }
 
         std::cout << "Distributed neuron system initialization completed!" << std::endl;
     }
 
-    explicit NeuronModel(const std::string& path) : processor(e5), logic_processor(e5), memory_processor(e5),
-                                             sct_processor(e5), cache_processor(e5) {
-        // Use delegating constructor
-        NeuronModel(2);
+    explicit NeuronModel(const std::string &path) : streams(), d_active_flags(nullptr), d_trace(nullptr),
+                                                    processor(e5), e5(), d_kvc(nullptr), logic_processor(e5),
+                                                    memory_processor(e5), sct_processor(e5), cache_processor(e5),
+                                                    score(0), training(false) {
         path_default = path;
         if (!load(path)) {
             throw std::runtime_error("Failed to load model from path: " + path);
@@ -208,12 +238,9 @@ public:
     bool run() {
         try {
             is_running = true;
-            eventloop = std::thread([this]() {
-                this->loop();
-            });
+            eventloop = std::thread(&NeuronModel::loop, this);
             eventloop.detach();
             std::cout << "Neuron network is running..." << std::endl;
-            std::thread(loop).detach();
             return true;
         } catch (...) {
             return false;
@@ -223,24 +250,37 @@ public:
     bool save(std::string path = "") {
         if (path.empty()) path = path_default;
         try {
-            // Reset pointers before saving
+            bool is_running_backup = is_running;
+            stop();
             resetPointersForSerialization();
-
-            std::vector<NeuronData> ndata;
-
-            for (ull i = 0; i < GRID_SIZE ^ 3; i++) {
-                ndata.push_back(d_neurons[i].save());
+            std::vector<NeuronData> host_neuron_data(GRID_SIZE * GRID_SIZE * GRID_SIZE);
+            std::vector<std::thread> threads;
+            for (ull i = 0; i < GRID_SIZE * GRID_SIZE * GRID_SIZE; i++) {
+                auto t = std::thread([this, i, &host_neuron_data] {
+                    NeuronData *d_neuron_data;
+                    cudaMalloc(&d_neuron_data, sizeof(NeuronData));
+                    auto stream_ = cudaStream_t{};
+                    cudaStreamCreate(&stream_);
+                    saveNeuronKernel<<<1, 1, 0, stream_>>>(d_neurons, d_neuron_data, i);
+                    cudaStreamSynchronize(stream_);
+                    cudaStreamDestroy(stream_);
+                    NeuronData host_data;
+                    cudaMemcpy(&host_data, d_neuron_data, sizeof(NeuronData), cudaMemcpyDeviceToHost);
+                    host_neuron_data[i] = host_data;
+                    cudaFree(d_neuron_data);
+                });
+                threads.push_back(std::move(t));
             }
-
+            for (auto &t: threads)
+                t.join();
             std::pair<NeuronModel, std::vector<NeuronData> > nmdata;
             nmdata.first.copyFrom(*this);
-            nmdata.second = ndata;
-
-            bool result = Serializer<std::pair<NeuronModel, std::vector<NeuronData> > >::save(nmdata, path);
-
+            nmdata.second = host_neuron_data;
+            const bool result = Serializer<std::pair<NeuronModel, std::vector<NeuronData> > >::save(nmdata, path);
             // Restore pointer connections after saving
             rebuildPointerConnections();
-
+            if (is_running_backup)
+                run();
             return result;
         } catch (...) {
             return false;
@@ -250,14 +290,21 @@ public:
     bool load(std::string path = "") {
         if (path.empty()) path = path_default;
         try {
+            stop();
             std::pair<NeuronModel, std::vector<NeuronData> > nmdata;
             if (!Serializer<std::pair<NeuronModel, std::vector<NeuronData> > >::load(nmdata, path)) {
                 return false;
             }
             this->copyFrom(nmdata.first);
+            std::vector<std::thread> threads;
             for (ull i = 0; i < nmdata.second.size(); i++) {
-                d_neurons[i].load(nmdata.second[i]);
+                auto t = std::thread([this, i, &nmdata] {
+                    d_neurons[i].load(nmdata.second[i]);
+                });
+                threads.push_back(std::move(t));
             }
+            for (auto &t: threads)
+                t.join();
             resetPointersForSerialization();
             rebuildPointerConnections();
             return true;
@@ -382,7 +429,11 @@ public:
         // Inject matching Logic into neuron
         for (const auto &[logic_id, neuron_input]: activated_logics) {
             if (neuron_index >= 0 && neuron_index < GRID_SIZE * GRID_SIZE * GRID_SIZE) {
-                d_neurons[neuron_index].inject(neuron_input, port);
+                NeuronInput *d_inp;
+                cudaMemcpy(&d_inp, &neuron_input, sizeof(NeuronInput), cudaMemcpyHostToDevice);
+                injectNeuronKernel<<<1, 1>>>(d_neurons, d_inp, neuron_index, port);
+                cudaDeviceSynchronize();
+                cudaFree(d_inp);
                 std::cout << "Injecting Logic: " << logic_id << " to neuron " << neuron_index
                         << " port " << port << std::endl;
             }
@@ -429,7 +480,11 @@ public:
                 img_inp.from_coord[1] = 0;
                 img_inp.from_coord[2] = 0;
                 img_inp.weight = 1.0;
-                d_neurons[0].inject(img_inp, 1);
+                NeuronInput *d_inp;
+                cudaMemcpy(&d_inp, &img_inp, sizeof(NeuronInput), cudaMemcpyHostToDevice);
+                injectNeuronKernel<<<1, 1>>>(d_neurons, d_inp, 0, 1);
+                cudaDeviceSynchronize();
+                cudaFree(d_inp);
             }
             if (msg.has_text) {
                 processTextString(&processor, "<User:" + role + "> " + msg.text);
@@ -512,10 +567,10 @@ public:
                 }).detach();
                 std::thread([this, msg]() {
                     auto matched_memories = memory_injector->findMatchingLogicIds(msg.text);
-                    for (const auto &key: matched_memories | views::keys) {
+                    for (const auto &key: matched_memories | std::views::keys) {
                         MemorySlot curr_memory;
                         memory_tree.fetchByHash(key, curr_memory);
-                        const char *curr_memory_str = reinterpret_cast<const char *>(curr_memory.content.c_str);
+                        const char *curr_memory_str = reinterpret_cast<const char *>(curr_memory.content.data());
                         processTextString(&memory_processor, std::string(curr_memory_str));
                         delete[] curr_memory_str;
                     }
@@ -537,12 +592,31 @@ public:
         return InputMessage{false, false, "", ""};
     }
 
+    bool clear_sct() {
+        try {
+            return sct.reset();
+        } catch (...) {
+            return false;
+        }
+    }
+
+    bool clear_cache() {
+        try {
+            while (!cache_queue.empty()) {
+                cache_queue.pop();
+            }
+        } catch (...) {
+            return false;
+        }
+        return true;
+    }
+
     bool stop() {
         try {
             is_running = false;
             // Wait for all streams to complete
             // Synchronize all CUDA streams to ensure all GPU operations are finished
-            for (auto & stream : streams) {
+            for (auto &stream: streams) {
                 cudaStreamSynchronize(stream);
             }
             eventloop.join();
@@ -555,7 +629,6 @@ public:
     ~NeuronModel() {
         std::cout << "Shutting down neuron network..." << std::endl;
         this->stop();
-        // 等待所有流完成
         for (const auto &stream: streams) {
             cudaStreamSynchronize(stream);
         }
@@ -568,6 +641,14 @@ public:
             }
             cudaFree(d_neurons);
             d_neurons = nullptr;
+#ifdef USE_OPTIMIZED_KERNELS
+            // clear
+            for (auto &kvc: h_kvc) {
+                cudaFree(kvc.k_cache);
+                cudaFree(kvc.v_cache);
+            }
+            cudaFree(d_kvc);
+#endif
         }
     }
 
@@ -575,15 +656,21 @@ public:
 
     void enable_training_mode() {
         training = true;
+        for (ull i = 0; i < GRID_SIZE ^ 3; i++) {
+            d_neurons[i].enable_training();
+        }
     }
 
     void disable_training_mode() {
         training = false;
+        for (ull i = 0; i < GRID_SIZE ^ 3; i++) {
+            d_neurons[i].disable_training();
+        }
     }
 
     bool update_score(double score_) {
         if (!training) return false;
-        try{
+        try {
             ull neuron_count = GRID_SIZE ^ 3;
             ull threads_per_block = 256;
             ull blocks = (neuron_count + threads_per_block - 1) / threads_per_block;
@@ -603,16 +690,140 @@ public:
         }
     }
 
+    NeuronStats get_n_stats(ull id) {
+        return d_neurons->get_stats();
+    }
+
+    /**
+     * @brief 在指定神经元上执行单步更新
+     *
+     * @param neuron_index 神经元索引
+     * @return true if成功, false if失败
+     */
+    bool updateNeuron(ull neuron_index) {
+        if (neuron_index >= GRID_SIZE * GRID_SIZE * GRID_SIZE) {
+            return false;
+        }
+
+        try {
+            // 使用CUDA内核来执行设备操作
+            updateNeuronKernel<<<1, 1>>>(d_neurons, neuron_index);
+            cudaDeviceSynchronize(); // 等待内核执行完成
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
+    /**
+     * @brief 向指定神经元注入输入数据
+     *
+     * @param neuron_index 神经元索引
+     * @param input 输入数据
+     * @param port 端口号
+     * @return true if成功, false if失败
+     */
+    bool injectToNeuron(ull neuron_index, const NeuronInput &input, int port) {
+        if (neuron_index >= GRID_SIZE * GRID_SIZE * GRID_SIZE || port < 0 || port >= 4) {
+            return false;
+        }
+
+        try {
+            NeuronInput *d_inp;
+            cudaMemcpy(&d_inp, &input, sizeof(NeuronInput), cudaMemcpyHostToDevice);
+            injectNeuronKernel<<<1, 1>>>(d_neurons, d_inp, neuron_index, port);
+            cudaDeviceSynchronize();
+            cudaFree(d_inp);
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
+    /**
+     * @brief 获取指定神经元的状态信息
+     *
+     * @param neuron_index 神经元索引
+     * @param stats 状态信息输出
+     * @return true if成功, false if失败
+     */
+    bool getNeuronStats(ull neuron_index, NeuronStats &stats) {
+        if (neuron_index >= GRID_SIZE * GRID_SIZE * GRID_SIZE) {
+            return false;
+        }
+
+        try {
+            // 使用CUDA内核来执行设备操作
+            NeuronStats *d_stats;
+            cudaMalloc(&d_stats, sizeof(NeuronStats));
+            getNeuronStatsKernel<<<1, 1>>>(d_neurons, d_stats, neuron_index);
+            cudaDeviceSynchronize(); // 等待内核执行完成
+
+            // 将结果从设备内存拷贝到主机内存
+            cudaMemcpy(&stats, d_stats, sizeof(NeuronStats), cudaMemcpyDeviceToHost);
+
+            // 释放设备内存
+            cudaFree(d_stats);
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
+    /**
+     * @brief 设置指定神经元的噪声参数
+     *
+     * @param neuron_index 神经元索引
+     * @param noise 噪声值
+     * @return true if成功, false if失败
+     */
+    bool setNeuronNoise(ull neuron_index, double noise) {
+        if (neuron_index >= GRID_SIZE * GRID_SIZE * GRID_SIZE) {
+            return false;
+        }
+
+        try {
+            // 使用CUDA内核来执行设备操作
+            setNeuronNoiseKernel<<<1, 1>>>(d_neurons, noise, neuron_index);
+            cudaDeviceSynchronize(); // 等待内核执行完成
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
+    /**
+     * @brief 设置指定神经元的学习率
+     *
+     * @param neuron_index 神经元索引
+     * @param learn_rate 学习率
+     * @return true if成功, false if失败
+     */
+    bool setNeuronLearnRate(ull neuron_index, double learn_rate) {
+        if (neuron_index >= GRID_SIZE * GRID_SIZE * GRID_SIZE) {
+            return false;
+        }
+
+        try {
+            // 使用CUDA内核来执行设备操作
+            setNeuronLearnRateKernel<<<1, 1>>>(d_neurons, learn_rate, neuron_index);
+            cudaDeviceSynchronize(); // 等待内核执行完成
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
 private:
     ull GRID_SIZE = 32;
     cudaStream_t streams[4];
-    __managed__ bool *d_active_flags;
-    __managed__ double *d_trace;
+    bool *d_active_flags;
+    double *d_trace;
     std::thread eventloop;
     ull NEURON_COUNT = 0; // Will be initialized in constructor
     ull THREADS_PER_BLOCK = 256;
     ull NUM_BLOCKS = 0; // Will be initialized in constructor
-    std::vector<std::vector<std::vector<DeviceQueue<Message, 32> > > > queues; // 使用vector代替固定数组
+    std::vector<std::vector<std::vector<DeviceQueue<Message, 32> > > > queues;
     Neuron *d_neurons{};
     ExternalStorage<KFE_STM_Slot> ext_kfe{};
     SemanticConversationTree sct{};
@@ -627,6 +838,11 @@ private:
     std::vector<std::string> current_logic;
     std::queue<std::string> cache_queue;
     std::string output_cache = "<You> ";
+
+#ifdef USE_OPTIMIZED_KERNELS
+    KVCache *d_kvc;
+    std::vector<KVCache> h_kvc;
+#endif
 
     // 语义匹配相关成员
     std::unique_ptr<FeatureExtractor> feature_extractor;
@@ -643,8 +859,21 @@ private:
 
     RAGKnowledgeBaseLoader rag_loader;
 
-    __managed__ double score;
-    __managed__ bool training;
+    double score;
+    bool training;
+
+    bool apply_trace() {
+        if (!training) return false;
+        try {
+            ull neuron_count = GRID_SIZE ^ 3;
+            ull threads_per_block = 256;
+            ull blocks = (neuron_count + threads_per_block - 1) / threads_per_block;
+            apply_trace_to_neurons<<<blocks, threads_per_block>>>(d_neurons, d_trace, score, neuron_count);
+        } catch (...) {
+            return false;
+        }
+        return true;
+    }
 
     /**
      * @brief Main processing loop for the neuron network.
@@ -704,7 +933,13 @@ private:
                 next_inp.from_coord[1] = 0;
                 next_inp.from_coord[2] = 0;
                 next_inp.weight = 1.0;
-                d_neurons[0].inject(next_inp, 0);
+                NeuronInput *d_inp;
+                cudaMemcpy(&d_inp, &next_inp, sizeof(NeuronInput), cudaMemcpyHostToDevice);
+                injectNeuronKernel<<<1, 1>>>(d_neurons, d_inp, 0, 0);
+                cudaDeviceSynchronize();
+                cudaFree(d_inp);
+                delete next_matrix;
+                next_matrix = nullptr;
                 delete next_matrix;
                 next_matrix = nullptr;
             }
@@ -721,7 +956,11 @@ private:
                         logic_inp.from_coord[1] = 0;
                         logic_inp.from_coord[2] = 0;
                         logic_inp.weight = 1.0;
-                        d_neurons[4].inject(logic_inp, i);
+                        NeuronInput *d_inp;
+                        cudaMemcpy(&d_inp, &logic_inp, sizeof(NeuronInput), cudaMemcpyHostToDevice);
+                        injectNeuronKernel<<<1, 1>>>(d_neurons, d_inp, 4, i);
+                        cudaDeviceSynchronize();
+                        cudaFree(d_inp);
                     }
                 }
             }
@@ -737,7 +976,11 @@ private:
                         sct_inp.from_coord[1] = 0;
                         sct_inp.from_coord[2] = 0;
                         sct_inp.weight = 1.0;
-                        d_neurons[5].inject(sct_inp, i);
+                        NeuronInput *d_inp;
+                        cudaMemcpy(&d_inp, &sct_inp, sizeof(NeuronInput), cudaMemcpyHostToDevice);
+                        injectNeuronKernel<<<1, 1>>>(d_neurons, d_inp, 5, i);
+                        cudaDeviceSynchronize();
+                        cudaFree(d_inp);
                     }
                 }
             }
@@ -753,7 +996,11 @@ private:
                         memory_inp.from_coord[1] = 0;
                         memory_inp.from_coord[2] = 0;
                         memory_inp.weight = 1.0;
-                        d_neurons[6].inject(memory_inp, i);
+                        NeuronInput *d_inp;
+                        cudaMemcpy(&d_inp, &memory_inp, sizeof(NeuronInput), cudaMemcpyHostToDevice);
+                        injectNeuronKernel<<<1, 1>>>(d_neurons, d_inp, 6, i);
+                        cudaDeviceSynchronize();
+                        cudaFree(d_inp);
                     }
                 }
             }
@@ -769,7 +1016,11 @@ private:
                         cache_inp.from_coord[1] = 0;
                         cache_inp.from_coord[2] = 0;
                         cache_inp.weight = 1.0;
-                        d_neurons[11].inject(cache_inp, i);
+                        NeuronInput *d_inp;
+                        cudaMemcpy(&d_inp, &cache_inp, sizeof(NeuronInput), cudaMemcpyHostToDevice);
+                        injectNeuronKernel<<<1, 1>>>(d_neurons, d_inp, 11, i);
+                        cudaDeviceSynchronize();
+                        cudaFree(d_inp);
                     }
                 }
             }
@@ -778,6 +1029,7 @@ private:
                 next_inject_mt = nullptr;
             }
             // Divide 32768 neurons into 4 groups, each using one stream
+#ifndef USE_OPTIMIZED_KERNELS
             ull neurons_per_stream = NEURON_COUNT / 4;
 
             for (int i = 0; i < 4; i++) {
@@ -791,6 +1043,26 @@ private:
                     count
                 );
             }
+#else
+            cudaMemcpy(d_kvc, h_kvc.data(), NEURON_COUNT * sizeof(KVCache),
+                       cudaMemcpyHostToDevice);
+            size_t pool_size = NEURON_COUNT * 256 * 256 * 16;
+            double *d_pool;
+            cudaMalloc(&d_pool, pool_size * sizeof(double));
+            cudaMemset(d_pool, 0, pool_size * sizeof(double));
+            ull blocks = NEURON_COUNT * 4;
+            ull threads = 1024;
+            ull neurons_per_stream = NEURON_COUNT / 4;
+            for (int i = 0; i < 4; i++) {
+                ull offset = i * neurons_per_stream;
+                ull count = (i == 3) ? (NEURON_COUNT - offset) : neurons_per_stream;
+                // Asynchronous launch (no waiting)
+                step_complete_fusion<<<blocks, threads, 0, streams[i]>>>(
+                    d_neurons + offset, NEURON_COUNT, score,
+                    d_kvc + offset, d_pool + offset, pool_size, d_active_flags + offset
+                );
+            }
+#endif
             memcpy(previous_matrix.data, current_matrix.data, sizeof(previous_matrix.data));
             memcpy(current_matrix.data, d_neurons[1].detach(0).array, sizeof(current_matrix.data));
             memcpy(previous_matrix_0.data, current_matrix_0.data, sizeof(previous_matrix_0.data));
@@ -938,7 +1210,7 @@ private:
                 for (const auto &memory_id: matched_memories) {
                     MemorySlot curr_memory;
                     memory_tree.fetchByHash(memory_id.first, curr_memory);
-                    const char *curr_memory_str = reinterpret_cast<const char *>(curr_memory.content.c_str);
+                    const char *curr_memory_str = reinterpret_cast<const char *>(curr_memory.content.data());
                     processTextString(&memory_processor, std::string(curr_memory_str));
                     delete[] curr_memory_str;
                 }
@@ -1007,15 +1279,19 @@ private:
             }
             ull neuron_count = GRID_SIZE ^ 3;
             int threads_per_block = 256;
-            int blocks = (neuron_count + threads_per_block - 1) / threads_per_block;
-
-            // 启动kernel
-            update_activity<<<blocks, threads_per_block>>>(d_neurons, d_active_flags, d_trace, score);
+            blocks = (neuron_count + threads_per_block - 1) / threads_per_block;
+            update_activity<<<blocks, threads_per_block>>>(d_neurons, d_active_flags, d_trace, score, training);
+            if (training) {
+                apply_trace_to_neurons<<<blocks, threads_per_block>>>(d_neurons, d_trace, score, neuron_count);
+                update_ema_baseline<<<1,1>>>(score);
+            }
             std::this_thread::sleep_for(std::chrono::nanoseconds(100));
-            // 等待所有流完成
             for (int i = 0; i < 4; i++) {
                 cudaStreamSynchronize(streams[i]);
             }
+#ifdef USE_OPTIMIZED_KERNELS
+            cudaFree(d_pool);
+#endif
         }
     }
 
@@ -1053,6 +1329,17 @@ private:
         return false;
     }
 
+    /**
+     * @brief 处理KFE管理器的队列
+     *
+     * @return 处理的请求数量
+     */
+    int processKFEQueues() {
+        // 注意：这个方法应该在KFEManager类中实现
+        // 这里只是一个占位符，实际实现应该在KFEManager中
+        return 0;
+    }
+
     void resetPointersForSerialization() const {
         // Reset pointers for all neurons
         ull total_neurons = GRID_SIZE * GRID_SIZE * GRID_SIZE;
@@ -1069,12 +1356,65 @@ private:
         memory_tree = other.memory_tree;
         cache_queue = other.cache_queue;
         memcpy(d_active_flags, other.d_active_flags, sizeof(d_active_flags));
-        ull total_neurons = GRID_SIZE * GRID_SIZE * GRID_SIZE;
-        for (ull i = 0; i < total_neurons; i++) {
-            d_neurons[i].load(other.d_neurons[i].save());
+
+        // 使用CUDA内存拷贝来复制神经元数据
+        // 分配临时主机内存
+        Neuron *temp_neurons = new Neuron[GRID_SIZE * GRID_SIZE * GRID_SIZE];
+        Neuron *other_temp_neurons = new Neuron[GRID_SIZE * GRID_SIZE * GRID_SIZE];
+
+        // 将设备内存拷贝到主机内存
+        cudaError_t err1 = cudaMemcpy(temp_neurons, d_neurons,
+                                      GRID_SIZE * GRID_SIZE * GRID_SIZE * sizeof(Neuron),
+                                      cudaMemcpyDeviceToHost);
+        if (err1 != cudaSuccess) {
+            delete[] temp_neurons;
+            delete[] other_temp_neurons;
+            return;
         }
+
+        cudaError_t err2 = cudaMemcpy(other_temp_neurons, other.d_neurons,
+                                      GRID_SIZE * GRID_SIZE * GRID_SIZE * sizeof(Neuron),
+                                      cudaMemcpyDeviceToHost);
+        if (err2 != cudaSuccess) {
+            delete[] temp_neurons;
+            delete[] other_temp_neurons;
+            return;
+        }
+
+        // 在主机端执行复制操作
+        for (ull i = 0; i < GRID_SIZE * GRID_SIZE * GRID_SIZE; i++) {
+            d_neurons[i].load(other.d_neurons[i].host_save());
+            cudaDeviceSynchronize(); // 等待内核执行完成
+        }
+
+        // 释放临时内存
+        delete[] temp_neurons;
+        delete[] other_temp_neurons;
+
         resetPointersForSerialization();
         rebuildPointerConnections();
+    }
+
+    /**
+     * @brief 处理设备队列
+     *
+     * @param queue_index 队列索引
+     * @param message 消息
+     * @return true if成功, false if失败
+     */
+    bool processDeviceQueue(int queue_index, const Message &message) {
+        if (queue_index < 0 || queue_index >= GRID_SIZE * GRID_SIZE * GRID_SIZE) {
+            return false;
+        }
+
+        try {
+            // 使用CUDA内核来执行设备操作
+            processMessageKernel<<<1, 1>>>(d_neurons, message, queue_index);
+            cudaDeviceSynchronize(); // 等待内核执行完成
+            return true;
+        } catch (...) {
+            return false;
+        }
     }
 
     void rebuildPointerConnections() {
