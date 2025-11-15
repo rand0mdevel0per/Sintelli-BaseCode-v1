@@ -1,3 +1,5 @@
+#pragma once
+
 #ifndef EXTERNAL_STORAGE_API_H
 #define EXTERNAL_STORAGE_API_H
 

@@ -1,6 +1,7 @@
 //
 // Created by ASUS on 10/1/2025.
 //
+#pragma once
 
 #ifndef GENERIC_EXTERNAL_STORAGE_H
 #define GENERIC_EXTERNAL_STORAGE_H

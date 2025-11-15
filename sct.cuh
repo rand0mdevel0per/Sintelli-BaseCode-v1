@@ -1,6 +1,7 @@
 //
 // Created by ASUS on 10/2/2025.
 //
+#pragma once
 
 #ifndef SRC_SCT_H
 #define SRC_SCT_H

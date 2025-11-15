@@ -1,5 +1,5 @@
-// Logic语义匹配器实现
-// 专门用于Logic的召回和注入
+#pragma once
+
 
 #include "semantic_matcher.cuh"
 #include <algorithm>

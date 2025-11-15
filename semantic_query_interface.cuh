@@ -1,5 +1,4 @@
-// 语义查询接口封装
-// 提供缓存、上下文感知、频率限制等高级功能
+#pragma once
 
 #ifndef SEMANTIC_QUERY_INTERFACE_H
 #define SEMANTIC_QUERY_INTERFACE_H

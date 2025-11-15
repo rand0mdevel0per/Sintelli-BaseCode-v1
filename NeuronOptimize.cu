@@ -1,16 +1,29 @@
-//
-// Created by ASUS on 11/9/2025.
-//
+/**
+ * @file NeuronOptimize.cu
+ * @brief Optimized CUDA kernels for neural network operations
+ * @date Created on 11/9/2025
+ * 
+ * Contains highly optimized GPU kernels using Tensor Cores and warp primitives
+ */
 #pragma once
+
+#ifndef SRC_NEURON_OPTIMIZE_CUH
+#define SRC_NEURON_OPTIMIZE_CUH
 
 #ifdef USE_OPTIMIZED_KERNELS
 
 #define ll long long
 #define ull unsigned long long
-#include "Neuron.cu"
+
+// Forward declaration to avoid circular dependency
+class Neuron;
+
+// Include only what's needed - Neuron.cu will be included by NeuronModel.cu
 #include <mma.h>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
+#include "structs.cuh"
+
 using namespace nvcuda;
 
 __device__ __forceinline__ double warpReduceSum(double val) {

@@ -10,6 +10,7 @@
  * @date 2025
  * @copyright MIT License
  */
+#pragma once
 
 #include "string_utils.h"
 #include <algorithm>

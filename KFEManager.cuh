@@ -12,6 +12,7 @@
  * @version 1.0
  * @date 2025-10-18
  */
+#pragma once
 
 #ifndef SRC_KFEMANAGER_H
 #define SRC_KFEMANAGER_H

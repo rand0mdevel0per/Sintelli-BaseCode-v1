@@ -1,3 +1,5 @@
+#pragma once
+
 #ifndef SEMANTIC_QUERY_ENGINE_H
 #define SEMANTIC_QUERY_ENGINE_H
 

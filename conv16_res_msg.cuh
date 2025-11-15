@@ -2,6 +2,7 @@
  * @file conv16_res_msg.cuh
  * @brief 16x16 Convolution kernel and residual message structures
  */
+#pragma once
 
 #ifndef CONV16_RESIDUAL_MESSAGE_H
 #define CONV16_RESIDUAL_MESSAGE_H

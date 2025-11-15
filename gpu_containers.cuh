@@ -2,6 +2,7 @@
  * @file gpu_containers.cuh
  * @brief GPU-compatible dynamic containers (替代STL的vector和string)
  */
+#pragma once
 
 #ifndef GPU_CONTAINERS_CUH
 #define GPU_CONTAINERS_CUH
@@ -9,11 +10,6 @@
 #include <cuda_runtime.h>
 #include <cstring>
 
-// ===== GPU String 喵 =====
-/**
- * @brief GPU兼容的字符串类
- * 使用小字符串优化(SSO)：<=31字节用栈，>31字节用堆
- */
 class GPUString {
 private:
     static constexpr size_t SSO_SIZE = 31;

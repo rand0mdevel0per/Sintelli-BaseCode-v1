@@ -14,7 +14,6 @@
 #ifndef SRC_NEURON_H
 #define SRC_NEURON_H
 
-#include <iostream>
 #include "deviceQueue.cu"
 #include "matrixMultiplex.cu"
 #include <curand_kernel.h>
@@ -22,9 +21,6 @@
 #include "isw.cuh"
 #include "conv16_res_msg.cuh"
 #include <cmath>
-#include <sm_20_intrinsics.h>
-#include <vector>
-#include "hasher.cuh"
 #include "structs.cuh"
 #include "sim.cu"
 #include "GPUMutex.cu"

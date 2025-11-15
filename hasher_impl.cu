@@ -2,6 +2,7 @@
 // Created by ASUS on 11/15/2025.
 // 设备端符号定义文件 - 解决RDC模式下的链接问题
 //
+#pragma once
 
 #include "hasher_cu.cuh"
 

@@ -1,5 +1,5 @@
 /**
- * @file structs.h
+ * @file structs.cuh
  * @brief Core data structures for neural network simulation
  * 
  * @details
@@ -13,6 +13,7 @@
  * @version 1.0
  * @date 2025-10-03
  */
+#pragma once
 
 #ifndef SRC_STRUCTS_H
 #define SRC_STRUCTS_H

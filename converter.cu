@@ -1,12 +1,12 @@
 //
 // Created by ASUS on 10/3/2025.
 //
+#pragma once
 
 #include "converter.cuh"
 #include <cmath>
 #include <new>
 
-// Base64编码表
 const char base64_chars[] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
     "abcdefghijklmnopqrstuvwxyz"
@@ -14,8 +14,6 @@ const char base64_chars[] =
 
 bool base64_encode(const uint8_t* data, size_t len, SimpleString& result) {
     if (!data && len > 0) return false;
-
-    // 计算输出长度
     size_t output_len = ((len + 2) / 3) * 4;
     char* output = new (std::nothrow) char[output_len + 1];
     if (!output) return false;

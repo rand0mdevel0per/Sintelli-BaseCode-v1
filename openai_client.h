@@ -10,6 +10,7 @@
  * @date 2025
  * @copyright MIT License
  */
+#pragma once
 
 #ifndef OPENAI_CLIENT_H
 #define OPENAI_CLIENT_H

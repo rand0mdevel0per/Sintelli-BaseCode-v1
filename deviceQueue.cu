@@ -3,6 +3,7 @@
  * @brief CUDA device-side queue implementation
  * @date Created on 9/29/2025
  */
+#pragma once
 
 #ifndef CUDA_DEVICE_QUEUE_CUH
 #define CUDA_DEVICE_QUEUE_CUH

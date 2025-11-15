@@ -1,6 +1,7 @@
 //
 // Created by ASUS on 10/3/2025.
 //
+#pragma once
 
 #ifndef SRC_DSLZMA_H
 #define SRC_DSLZMA_H

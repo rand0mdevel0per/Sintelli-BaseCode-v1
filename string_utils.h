@@ -10,6 +10,7 @@
  * @date 2025
  * @copyright MIT License
  */
+#pragma once
 
 #ifndef STRING_UTILS_H
 #define STRING_UTILS_H

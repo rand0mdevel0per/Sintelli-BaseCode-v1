@@ -2,6 +2,7 @@
 // Unified Image-Text Matrix Encoding System - Full Version (Pure C++ BPE Tokenizer)
 // unified_system.cpp
 // ============================================================================
+#pragma once
 
 #ifndef SRC_UNIFIED_SYSTEM_CPP
 #define SRC_UNIFIED_SYSTEM_CPP

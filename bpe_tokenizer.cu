@@ -2,6 +2,8 @@
 // Optimized BPE Tokenizer Implementation
 // Created with improved performance and error handling
 //
+#pragma once
+
 
 #include <string>
 #include <vector>

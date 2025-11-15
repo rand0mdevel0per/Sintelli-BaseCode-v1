@@ -1,6 +1,7 @@
 //
 // Created by ASUS on 10/18/2025.
 //
+#pragma once
 
 #ifndef SRC_GPUMUTEX_CUH
 #define SRC_GPUMUTEX_CUH

@@ -5,7 +5,8 @@
 #include <cstdint>
 #include <new>
 
-// 简单内存管理包装
+#pragma once
+
 class DoubleBuffer {
 private:
     double* data_;
@@ -31,7 +32,6 @@ public:
         if (!new_data && new_size > 0) return false;
 
         if (data_) {
-            // 拷贝现有数据
             size_t copy_size = (new_size < size_) ? new_size : size_;
             for (size_t i = 0; i < copy_size; ++i) {
                 new_data[i] = data_[i];

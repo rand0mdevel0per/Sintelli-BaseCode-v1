@@ -1,6 +1,7 @@
 //
 // Created by ASUS on 11/9/2025.
 //
+#pragma once
 
 #ifndef SRC_HASHER_CU_CUH
 #define SRC_HASHER_CU_CUH

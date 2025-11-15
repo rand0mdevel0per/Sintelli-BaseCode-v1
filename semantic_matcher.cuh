@@ -1,5 +1,4 @@
-// 语义匹配器 - 基于特征向量的语义搜索和匹配
-// 集成到NeuronModel中的语义匹配功能
+#pragma once
 
 #ifndef SEMANTIC_MATCHER_H
 #define SEMANTIC_MATCHER_H

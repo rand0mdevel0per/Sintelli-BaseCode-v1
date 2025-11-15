@@ -91,7 +91,6 @@ add_library(src SHARED
         conv16_res_msg.cuh
         sct.cuh
         hasher.cuh
-        wss.cuh
         queue.cu
         NeuronModel.cu
         Neuron.cu
@@ -106,7 +105,6 @@ add_library(src SHARED
         openai_client.h
         logic_semantic_matcher.cu
         GPUMutex.cu
-        rag_knowledge_loader.cu
         rag_knowledge_loader.cuh
         memory_slot.cuh
         feature_extractor.cu
@@ -120,6 +118,9 @@ add_library(src SHARED
         hasher_cu.cuh
         hasher_impl.cu
         ffi_bridge.cu
+        string_utils.h
+        string_utils.cpp
+        string_utils.h
 )
 
 # =============================================================================

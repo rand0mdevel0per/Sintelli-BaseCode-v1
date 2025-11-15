@@ -1,4 +1,6 @@
 // ========== memory_slot.h ==========
+#pragma once
+
 #ifndef MEMORY_SLOT_H
 #define MEMORY_SLOT_H
 

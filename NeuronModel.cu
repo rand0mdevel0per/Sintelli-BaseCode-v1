@@ -5,6 +5,7 @@
  * 
  * This class handles neuron allocation and inter-neuron connectivity
  */
+#pragma once
 
 #ifndef SRC_NEURONMODEL_CUH
 #define SRC_NEURONMODEL_CUH
@@ -17,7 +18,6 @@
 #include <Windows.h>
 
 // Core utility headers
-#include "atomic_utils.cuh"
 #include "structs.cuh"
 #include "memory_slot.cuh"
 
@@ -27,11 +27,10 @@
 #include "dslzma.h"
 #include "feature_extractor.cuh"
 #include "semantic_matcher.cuh"
-#include "semantic_query_interface.cuh"
 #include "KFEManager.cuh"
 
 // External libraries
-#include "huggingface_rag_integration.cpp"
+#include "rag_knowledge_loader.cuh"
 
 #ifdef USE_OPTIMIZED_KERNELS
 #include "NeuronOptimize.cu"
@@ -114,8 +113,8 @@ public:
 #endif
 
         cudaMalloc(&d_active_flags, NEURON_COUNT * sizeof(bool));
-        for (int i = 0; i < 4; i++) {
-            cudaStreamCreate(&streams[i]);
+        for (auto & stream : streams) {
+            cudaStreamCreate(&stream);
         }
 
         // Initialize: all activated
@@ -568,7 +567,7 @@ public:
                 }).detach();
                 std::thread([this, msg]() {
                     auto matched_memories = memory_injector->findMatchingLogicIds(msg.text);
-                    for (const auto &key: matched_memories | views::keys) {
+                    for (const auto &key: matched_memories | std::views::keys) {
                         MemorySlot curr_memory;
                         memory_tree.fetchByHash(key, curr_memory);
                         const char *curr_memory_str = reinterpret_cast<const char *>(curr_memory.content.data());

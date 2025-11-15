@@ -1,3 +1,5 @@
+#pragma once
+
 #include "semantic_query_engine.cuh"
 #include "isw.cuh"  // FeatureVector的完整定义
 #include "smry.cu"  // 包含E5模型实现
