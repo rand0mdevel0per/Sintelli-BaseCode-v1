@@ -16,7 +16,7 @@ jobs:
     name: Code Quality Check
     runs-on: ubuntu-latest
     container: nvidia/cuda:13.0.2-devel-ubuntu22.04
-
+    
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -31,7 +31,18 @@ jobs:
       - name: Install Build Tools
         run: |
           apt-get update
-          apt-get install -y cmake ninja-build git curl zip unzip tar
+          apt-get install -y software-properties-common wget lsb-release gpg
+          wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | gpg --dearmor - | tee /usr/share/keyrings/kitware-archive-keyring.gpg >/dev/null
+          echo "deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/kitware.list >/dev/null
+          apt-get update
+          apt-get install -y cmake ninja-build git curl zip unzip tar pkg-config python3.11 python3.11-venv python3.11-dev
+          update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
+          apt-get clean
+
+      - name: Verify Python Installation
+        run: |
+          env -u LD_LIBRARY_PATH python3 --version
+          env -u LD_LIBRARY_PATH python3 -c "import sysconfig; print('Python sysconfig imported successfully')"
 
       - name: Setup vcpkg
         run: |
@@ -43,19 +54,19 @@ jobs:
         run: |
           mkdir build
           cd build
-          cmake .. -DCMAKE_TOOLCHAIN_FILE="/opt/vcpkg/scripts/buildsystems/vcpkg.cmake" \
-               -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -G Ninja
+          env -u LD_LIBRARY_PATH cmake .. -DCMAKE_TOOLCHAIN_FILE="/opt/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+               -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -G Ninja \
+               -DPython3_EXECUTABLE=/usr/bin/python3
           cp ./compile_commands.json ../compile_commands.json
 
       - name: Install Clang-Tidy
         run: |
-          apt-get update
-          apt-get install -y clang-tidy-16
+          pip install clang-tidy
 
       - name: Run Clang-Tidy
         run: |
           find src -name "*.cu" -o -name "*.cpp" | \
-            xargs clang-tidy-16 -p . \
+            xargs clang-tidy -p . \
             --checks='bugprone-*,performance-*' \
             --warnings-as-errors='' \
             > clang-tidy-report.txt || true
@@ -111,11 +122,11 @@ jobs:
           mkdir build
           cd build
 
-          cmake .. -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake" `
+          env -u LD_LIBRARY_PATH cmake .. -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake" `
                    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON `
-                   -G Ninja "
+                   -G Ninja
 
-          cmake --build . --target src -j 24
+          env -u LD_LIBRARY_PATH cmake --build . --target src -j 24
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
@@ -143,7 +154,18 @@ jobs:
       - name: Install Build Tools
         run: |
           apt-get update
-          apt-get install -y cmake ninja-build git curl zip unzip tar
+          apt-get install -y software-properties-common wget lsb-release gpg
+          wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | gpg --dearmor - | tee /usr/share/keyrings/kitware-archive-keyring.gpg >/dev/null
+          echo "deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/kitware.list >/dev/null
+          apt-get update
+          apt-get install -y cmake ninja-build git curl zip unzip tar pkg-config python3.11 python3.11-venv python3.11-dev
+          update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
+          apt-get clean
+
+      - name: Verify Python Installation
+        run: |
+          env -u LD_LIBRARY_PATH python3 --version
+          env -u LD_LIBRARY_PATH python3 -c "import sysconfig; print('Python sysconfig imported successfully')"
 
       - name: Setup vcpkg
         run: |
@@ -156,10 +178,11 @@ jobs:
           mkdir build
           cd build
 
-          cmake .. -DCMAKE_TOOLCHAIN_FILE="/opt/vcpkg/scripts/buildsystems/vcpkg.cmake" \
-               -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -G Ninja"
+          env -u LD_LIBRARY_PATH cmake .. -DCMAKE_TOOLCHAIN_FILE="/opt/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+               -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -G Ninja \
+               -DPython3_EXECUTABLE=/usr/bin/python3
 
-          cmake --build . --target src -j 24
+          env -u LD_LIBRARY_PATH cmake --build . --target src -j 24
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
