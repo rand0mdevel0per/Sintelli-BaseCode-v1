@@ -15,7 +15,8 @@ jobs:
   code-quality:
     name: Code Quality Check
     runs-on: ubuntu-latest
-    
+    container: nvidia/cuda:13.0.2-devel-ubuntu22.04
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -27,22 +28,10 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Setup GCC 11 for CUDA Compatibility
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-11 g++-11
-          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100
-          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 100
-
-      - name: Install CUDA
-        uses: Jimver/cuda-toolkit@master
-        with:
-          cuda: ${{ env.CUDA_VERSION }}
-
       - name: Install Build Tools
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build
+          apt-get update
+          apt-get install -y cmake ninja-build git curl zip unzip tar
 
       - name: Setup vcpkg
         run: |
@@ -55,13 +44,13 @@ jobs:
           mkdir build
           cd build
           cmake .. -DCMAKE_TOOLCHAIN_FILE="/opt/vcpkg/scripts/buildsystems/vcpkg.cmake" \
-               -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -G Ninja"
+               -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -G Ninja
           cp ./compile_commands.json ../compile_commands.json
 
       - name: Install Clang-Tidy
         run: |
-          sudo apt-get update
-          sudo apt-get install -y clang-tidy-16
+          apt-get update
+          apt-get install -y clang-tidy-16
 
       - name: Run Clang-Tidy
         run: |
@@ -105,16 +94,16 @@ jobs:
         with:
           cuda: ${{ env.CUDA_VERSION }}
 
+      - name: Install Dependencies
+        shell: powershell
+        run: |
+          choco install ninja git --no-progress
+
       - name: Setup vcpkg
         run: |
           git clone https://github.com/microsoft/vcpkg.git C:\vcpkg
           C:\vcpkg\bootstrap-vcpkg.bat
           echo "VCPKG_ROOT=C:\vcpkg" >> $env:GITHUB_ENV
-
-      - name: Install Ninja
-        shell: powershell
-        run: |
-          choco install ninja --no-progress
 
       - name: Configure and Build Package
         shell: powershell
@@ -139,6 +128,7 @@ jobs:
   build-linux:
     name: Build on Linux
     runs-on: ubuntu-latest
+    container: nvidia/cuda:13.0.2-devel-ubuntu22.04
     needs: code-quality
 
     steps:
@@ -150,22 +140,10 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Setup GCC 11 for CUDA Compatibility
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-11 g++-11
-          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100
-          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 100
-
-      - name: Install CUDA
-        uses: Jimver/cuda-toolkit@master
-        with:
-          cuda: ${{ env.CUDA_VERSION }}
-
       - name: Install Build Tools
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build
+          apt-get update
+          apt-get install -y cmake ninja-build git curl zip unzip tar
 
       - name: Setup vcpkg
         run: |
