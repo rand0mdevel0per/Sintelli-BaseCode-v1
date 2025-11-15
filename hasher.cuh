@@ -16,6 +16,9 @@
 #include <cstring>
 #include <iostream>
 #include <type_traits> // 用于检查类型是否为 POD (Plain Old Data)
+#ifdef __CUDA_ARCH__
+#include "hasher_cu.cuh"
+#endif
 
 /**
  * @brief CUDA设备端高效 MurmurHash3 32位实现
@@ -27,8 +30,8 @@
  * @param seed 哈希种子
  * @return uint32_t 计算得到的 32 位哈希值
  */
-__device__ __forceinline__ uint32_t MurmurHash3_32(const void* key, int len, uint32_t seed) {
-    const uint8_t* data = (const uint8_t*)key;
+__device__ __forceinline__ uint32_t MurmurHash3_32(const void *key, int len, uint32_t seed) {
+    const uint8_t *data = (const uint8_t *) key;
     const int nblocks = len / 4;
     uint32_t h1 = seed;
 
@@ -39,7 +42,7 @@ __device__ __forceinline__ uint32_t MurmurHash3_32(const void* key, int len, uin
     // -----------------------------------------------------------------------------
     // 1. 处理4字节块 (Process blocks)
     // -----------------------------------------------------------------------------
-    const uint32_t* blocks = (const uint32_t*)(data);
+    const uint32_t *blocks = (const uint32_t *) (data);
 
     for (int i = 0; i < nblocks; i++) {
         uint32_t k1;
@@ -60,18 +63,18 @@ __device__ __forceinline__ uint32_t MurmurHash3_32(const void* key, int len, uin
     // -----------------------------------------------------------------------------
     // 2. 处理尾部字节 (Handle the remainder)
     // -----------------------------------------------------------------------------
-    const uint8_t* tail = (const uint8_t*)(data + nblocks * 4);
+    const uint8_t *tail = (const uint8_t *) (data + nblocks * 4);
     uint32_t k1 = 0;
 
     switch (len & 3) {
         case 3: k1 ^= tail[2] << 16;
         case 2: k1 ^= tail[1] << 8;
         case 1: k1 ^= tail[0];
-                k1 *= c1;
-                k1 = (k1 << 15) | (k1 >> (32 - 15));
-                k1 *= c2;
-                h1 ^= k1;
-                break;
+            k1 *= c1;
+            k1 = (k1 << 15) | (k1 >> (32 - 15));
+            k1 *= c2;
+            h1 ^= k1;
+            break;
         default: break;
     }
 
@@ -103,7 +106,6 @@ __device__ __forceinline__ uint32_t MurmurHash3_32(const void* key, int len, uin
 // =================================================================
 
 namespace SHA256 {
-
     // SHA-256 常量 K
     constexpr uint32_t K[64] = {
         0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -129,16 +131,16 @@ namespace SHA256 {
     }
 
     // 宏定义: 右旋 (Rotate Right)
-    #define ROTR(x, n) (((x) >> (n)) | ((x) << (32 - (n))))
+#define ROTR(x, n) (((x) >> (n)) | ((x) << (32 - (n))))
 
     // SHA-256 核心函数 (Sigma, Choice, Majority)
-    #define SHR(x, n) ((x) >> (n))
-    #define SIGMA0(x) (ROTR(x, 2) ^ ROTR(x, 13) ^ ROTR(x, 22))
-    #define SIGMA1(x) (ROTR(x, 6) ^ ROTR(x, 11) ^ ROTR(x, 25))
-    #define sig0(x) (ROTR(x, 7) ^ ROTR(x, 18) ^ SHR(x, 3))
-    #define sig1(x) (ROTR(x, 17) ^ ROTR(x, 19) ^ SHR(x, 10))
-    #define CH(x, y, z) (((x) & (y)) ^ (~(x) & (z)))
-    #define MAJ(x, y, z) (((x) & (y)) ^ ((x) & (z)) ^ ((y) & (z)))
+#define SHR(x, n) ((x) >> (n))
+#define SIGMA0(x) (ROTR(x, 2) ^ ROTR(x, 13) ^ ROTR(x, 22))
+#define SIGMA1(x) (ROTR(x, 6) ^ ROTR(x, 11) ^ ROTR(x, 25))
+#define sig0(x) (ROTR(x, 7) ^ ROTR(x, 18) ^ SHR(x, 3))
+#define sig1(x) (ROTR(x, 17) ^ ROTR(x, 19) ^ SHR(x, 10))
+#define CH(x, y, z) (((x) & (y)) ^ (~(x) & (z)))
+#define MAJ(x, y, z) (((x) & (y)) ^ ((x) & (z)) ^ ((y) & (z)))
 
     /**
      * @brief SHA-256 核心压缩函数。处理一个 512-bit (64-byte) 的数据块。
@@ -190,66 +192,47 @@ namespace SHA256 {
      * @param input_bytes 待哈希的字节向量。
      * @return std::string 64字符的十六进制哈希值。
      */
-    std::string hash(const std::vector<uint8_t>& input_bytes) {
-        // 1. 初始化哈希状态 (每次重新初始化)
+    __host__ __device__ std::string hash(const std::vector<uint8_t> &input_bytes) {
+#ifndef __CUDA_ARCH__
         uint32_t H_state[8];
         initialize_H(H_state);
-
-        // 2. 消息填充
         std::vector<uint8_t> padded_data = input_bytes;
-
-        // 消息长度 (位)
-        uint64_t L = (uint64_t)input_bytes.size() * 8;
-
-        // 追加 '1' 位 (即 0x80 字节)
+        uint64_t L = (uint64_t) input_bytes.size() * 8;
         padded_data.push_back(0x80);
 
-        // 如果当前长度模 64 字节大于 56 字节，则需要增加一个额外的 64 字节块
         size_t current_len_mod_64 = padded_data.size() % 64;
         size_t padding_len = 0;
         if (current_len_mod_64 <= 56) {
             padding_len = 56 - current_len_mod_64;
-        } else { // 64 - (len % 64) + 56
+        } else {
+            // 64 - (len % 64) + 56
             padding_len = 64 - current_len_mod_64 + 56;
         }
-
-        // 填充零字节
         for (size_t i = 0; i < padding_len; ++i) {
             padded_data.push_back(0x00);
         }
-
-        // 追加原始消息长度 L (64 位，大端序)
         for (int i = 0; i < 8; ++i) {
-            padded_data.push_back((uint8_t)(L >> (56 - i * 8)));
+            padded_data.push_back((uint8_t) (L >> (56 - i * 8)));
         }
-
-        // 3. 处理数据块
         size_t num_blocks = padded_data.size() / 64;
         for (size_t block_idx = 0; block_idx < num_blocks; ++block_idx) {
             uint32_t W[64];
-            const uint8_t* block_start = &padded_data[block_idx * 64];
-
-            // a) 将 512-bit 数据块解析为 16 个 32-bit 大端序字 W[0..15]
+            const uint8_t *block_start = &padded_data[block_idx * 64];
             for (int i = 0; i < 16; ++i) {
-                // 大端序转换: 字节 [0, 1, 2, 3] -> (0 << 24 | 1 << 16 | 2 << 8 | 3)
-                W[i] = ((uint32_t)block_start[i * 4] << 24) |
-                       ((uint32_t)block_start[i * 4 + 1] << 16) |
-                       ((uint32_t)block_start[i * 4 + 2] << 8) |
-                       ((uint32_t)block_start[i * 4 + 3]);
+                // [0, 1, 2, 3] -> (0 << 24 | 1 << 16 | 2 << 8 | 3)
+                W[i] = ((uint32_t) block_start[i * 4] << 24) |
+                       ((uint32_t) block_start[i * 4 + 1] << 16) |
+                       ((uint32_t) block_start[i * 4 + 2] << 8) |
+                       ((uint32_t) block_start[i * 4 + 3]);
             }
-
-            // b) 消息调度：扩展 W[16..63]
             for (int i = 16; i < 64; ++i) {
                 uint32_t s0 = sig0(W[i - 15]);
                 uint32_t s1 = sig1(W[i - 2]);
                 W[i] = W[i - 16] + s0 + W[i - 7] + s1;
             }
-
-            // c) 压缩函数
             process_block(W, H_state);
         }
 
-        // 4. 输出结果 (8个32位字 -> 64个十六进制字符)
         std::stringstream ss;
         ss << std::hex << std::setfill('0');
         for (int i = 0; i < 8; ++i) {
@@ -257,8 +240,12 @@ namespace SHA256 {
         }
 
         return ss.str();
+#else
+        uint8_t out32[32];
+        sha256_digest_device(input_bytes.data(), input_bytes.size(), out32);
+        return std::string(reinterpret_cast<char *>(out32), 32);
+#endif
     }
-
 } // namespace SHA256
 
 /**
@@ -270,89 +257,47 @@ namespace SHA256 {
  * @return std::string 64字符的十六进制 SHA-256 哈希值。
  */
 template<typename T>
-std::string sha256_hash(const T& data) {
-    // 对于标准布局类型，直接使用内存视图
+__host__ __device__ std::string sha256_hash(const T &data) {
     if constexpr (std::is_standard_layout<T>::value || std::is_arithmetic<T>::value) {
-        // 将输入数据的内存视图转换为字节向量
-        const uint8_t* bytes = reinterpret_cast<const uint8_t*>(&data);
+        const uint8_t *bytes = reinterpret_cast<const uint8_t *>(&data);
         std::vector<uint8_t> input_bytes(bytes, bytes + sizeof(T));
-
-        // 调用核心哈希函数
         return SHA256::hash(input_bytes);
     } else {
-        // 对于非标准布局类型，需要特殊处理
-        // 这里我们使用一个简单的序列化方法
         std::ostringstream oss;
-        // 这里需要根据具体类型实现序列化
-        // 暂时返回一个默认实现
-        return SHA256::hash(std::vector<uint8_t>(reinterpret_cast<const uint8_t*>(&data), 
-                                               reinterpret_cast<const uint8_t*>(&data) + sizeof(data)));
+        return SHA256::hash(std::vector<uint8_t>(reinterpret_cast<const uint8_t *>(&data),
+                                                 reinterpret_cast<const uint8_t *>(&data) + sizeof(data)));
     }
 }
 
-// 针对 char* 的重载
 template<>
-inline std::string sha256_hash<char*>(char* const& data) {
+inline __host__ __device__ std::string sha256_hash<char *>(char *const&data) {
     if (!data) return SHA256::hash(std::vector<uint8_t>()); // 空指针返回空哈希
 
     size_t len = std::strlen(data);
-    const uint8_t* bytes = reinterpret_cast<const uint8_t*>(data);
+    const uint8_t *bytes = reinterpret_cast<const uint8_t *>(data);
     std::vector<uint8_t> input_bytes(bytes, bytes + len);
 
     return SHA256::hash(input_bytes);
 }
 
-// 针对 const char* 的重载
 template<>
-inline std::string sha256_hash<const char*>(const char* const& data) {
+inline __host__ __device__ std::string sha256_hash<const char *>(const char *const&data) {
     if (!data) return SHA256::hash(std::vector<uint8_t>()); // 空指针返回空哈希
 
     size_t len = std::strlen(data);
-    const uint8_t* bytes = reinterpret_cast<const uint8_t*>(data);
+    const uint8_t *bytes = reinterpret_cast<const uint8_t *>(data);
     std::vector<uint8_t> input_bytes(bytes, bytes + len);
 
     return SHA256::hash(input_bytes);
 }
 
-// 针对 std::string 的重载
 template<>
-inline std::string sha256_hash<std::string>(const std::string& data) {
-    const uint8_t* bytes = reinterpret_cast<const uint8_t*>(data.data());
+inline __host__ __device__ std::string sha256_hash<std::string>(const std::string &data) {
+    const uint8_t *bytes = reinterpret_cast<const uint8_t *>(data.data());
     std::vector<uint8_t> input_bytes(bytes, bytes + data.length());
 
     return SHA256::hash(input_bytes);
 }
-
-// =================================================================
-// 示例用法: (如果需要测试，可以放在 main.cpp 或单元测试中)
-// =================================================================
-/*
-#include <iostream>
-
-struct MyStruct {
-    double value;
-    int index;
-    // 注意: 确保结构体是 POD 或 Standard Layout
-};
-
-void test_sha256() {
-    // 1. 哈希基本类型
-    int number = 12345;
-    std::string hash_num = sha256_hash(number);
-    std::cout << "Hash(int 12345): " << hash_num << std::endl;
-
-    // 2. 哈希字符串
-    std::string text = "Hello world!";
-    std::string hash_text = sha256_hash(text);
-    std::cout << "Hash(\"Hello world!\"): " << hash_text << std::endl;
-    // 预期结果: c0535e4be2b79ffd93291305436bf889314e4a3faec05ecffcbb7df31ad9e51a
-
-    // 3. 哈希结构体
-    MyStruct data = {3.14159, 42};
-    std::string hash_struct = sha256_hash(data);
-    std::cout << "Hash(MyStruct): " << hash_struct << std::endl;
-}
-*/
 
 #endif
 

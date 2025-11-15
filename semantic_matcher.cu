@@ -1,7 +1,7 @@
 // 语义匹配器实现
 // 集成语义匹配功能到神经元系统
 
-#include "semantic_matcher.h"
+#include "semantic_matcher.cuh"
 #include <algorithm>
 #include <random>
 

@@ -18,9 +18,9 @@
 #include <locale>
 #include <codecvt>
 
-#include "structs.h"
+#include "structs.cuh"
 #include "json/nlohmann/json.hpp"
-#include "converter.h"
+#include "converter.cuh"
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -376,7 +376,7 @@ ContentType detectContentType(const wchar_t *text, int length) {
     return TYPE_NATURAL_TEXT;
 }
 
-#include "bpe_tokenizer.cpp"
+#include "bpe_tokenizer.cu"
 
 // ============ E5-Large模型 ============
 class E5LargeModel {

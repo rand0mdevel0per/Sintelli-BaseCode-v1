@@ -6,8 +6,8 @@
 
 #include <string>
 #include <vector>
-#include "smry.cpp"
-#include "isw.hpp"
+#include "smry.cu"
+#include "isw.cuh"
 
 class FeatureExtractor {
 private:
@@ -15,10 +15,10 @@ private:
     UnifiedInputProcessor* text_processor;
     
 public:
-    FeatureExtractor(const std::string& model_path = "/models/e5/e5_large.onnx",
-                    const std::string& vocab_path = "/models/vocab.json",
-                    const std::string& merges_path = "/models/merges.txt",
-                    const std::string& special_tokens_path = "/models/special_tokens.json");
+    explicit FeatureExtractor(const std::string& model_path = "/models/e5/e5_large.onnx",
+                              const std::string& vocab_path = "/models/vocab.json",
+                              const std::string& merges_path = "/models/merges.txt",
+                              const std::string& special_tokens_path = "/models/special_tokens.json");
     
     ~FeatureExtractor();
     

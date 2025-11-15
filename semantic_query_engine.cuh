@@ -5,9 +5,7 @@
 #include <vector>
 #include <memory>
 
-// IMPORTANT: 必须在使用前包含模板定义
-#include "isw.hpp"
-
+// 前向声明，避免循环包含
 template<typename T>
 class FeatureVector;
 

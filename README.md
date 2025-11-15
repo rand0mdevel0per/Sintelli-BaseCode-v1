@@ -41,7 +41,7 @@ src/
 ├── Matrix operations (matrixMultiplex.cpp)
 ├── Message encoding/decoding (converter.h, converter.cpp)
 ├── Data structure definitions (structs.h, conv16_res_msg.h)
-├── Utility headers (hasher.h, isw.hpp, sct.hpp, wss.hpp)
+├── Utility headers (hasher.h, isw.cuh, sct.hpp, wss.hpp)
 ├── Third-party libraries (cutlass/, json/)
 ├── Model files (models/)
 ├── Build directories (cmake-build-debug/, cmake-build-debug-visual-studio/)

@@ -1,6 +1,6 @@
 // RAG Knowledge Base Loader Implementation
 
-#include "rag_knowledge_loader.h"
+#include "rag_knowledge_loader.cuh"
 #include "openai_client.h"
 #include <iostream>
 #include <sstream>

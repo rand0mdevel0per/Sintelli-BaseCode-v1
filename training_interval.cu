@@ -580,8 +580,6 @@ void run_training(NeuronModel *model, const std::string &api_key, const std::str
             "Remember: You are shaping " + name +
             "'s development. Each interaction contributes to building a more capable, reliable, and engaging AI assistant."
             "The chat of you and " + name + " below:";
-
-    // 使用支持多模态的构造函数创建消息
     msgs.emplace_back("system", system_prompt);
 
     OpenAIClient::HttpClient client(api_key);
@@ -597,7 +595,6 @@ void run_training(NeuronModel *model, const std::string &api_key, const std::str
     RAGKnowledgeBaseLoader rag_loader;
     ExternalStorage<Logic> logic_tree{};
 
-    // 创建请求对象
     OpenAIClient::ChatCompletionRequest req;
     req.model = "google/gemini-2.5-flash-preview-09-2025";
     req.messages = msgs;
@@ -622,9 +619,38 @@ void run_training(NeuronModel *model, const std::string &api_key, const std::str
 
             if (msg.has_text) {
                 auto text = msg.text;
-                if (text.length() >= 9 && text.substr(text.length() - 9) == "<[/stop]>") {
-                    model_req.append(text.substr(0, text.length() - 9));
-                    break;
+                std::vector<std::string> stop_sequences = {
+                    // Dialogue markers (highest priority)
+                    "\n\nUser:",
+                    "\n\nAssistant:",
+                    "\n\nHuman:",
+                    "\n\nAI:",
+
+                    // Natural sentence endings
+                    ".\n\n",      // Period + double newline
+                    "!\n\n",      // Exclamation
+                    "?\n\n",      // Question
+
+                    // Paragraph endings
+                    "\n\n\n",     // Triple newline (clear break)
+
+                    // Special tokens (for future RL training)
+                    "<|end_of_text|>",
+                    "<|end|>",
+                    "<EOS>",
+                    "</[stop]>",
+
+                    // For multilingual (if needed)
+                    "。\n\n",     // Chinese period
+                    "！\n\n",
+                    "？\n\n"
+                };
+                for (const auto& break_seq : stop_sequences) {
+                    size_t pos = text.find(break_seq);
+                    if (pos != std::string::npos) {
+                        text = text.substr(0, pos + break_seq.length());
+                        break;
+                    }
                 }
                 model_req.append(text);
                 if (model_req.size() > 25565) break;
@@ -647,7 +673,7 @@ void run_training(NeuronModel *model, const std::string &api_key, const std::str
 
             req.messages.emplace_back("assistant", response);
             std::string lower_input = response;
-            std::transform(lower_input.begin(), lower_input.end(), lower_input.begin(), ::tolower);
+            ranges::transform(lower_input, lower_input.begin(), ::tolower);
             if (lower_input.find("<tool_begin>") != std::string::npos) {
                 auto tool_calls = parseToolCall(response);
                 if (tool_calls.first == "ach45") {

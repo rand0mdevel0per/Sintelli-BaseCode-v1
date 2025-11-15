@@ -23,8 +23,8 @@
 #include <codecvt>
 #include <locale>
 #include <optional>
-#include "smry.cpp"
-#include "semantic_query_engine.h"
+#include "smry.cu"
+#include "semantic_query_engine.cuh"
 
 // ===== 存储层级枚举 =====
 enum StorageTier {

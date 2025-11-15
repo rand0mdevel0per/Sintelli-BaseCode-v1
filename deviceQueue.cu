@@ -37,8 +37,25 @@ ull atomicAdd_(ull *ptr, ull value) {
 #define atomicAdd atomicAdd_
 #endif
 
+__device__ __forceinline__ unsigned long long atomicSubULL(unsigned long long* address, unsigned long long val) {
+#ifdef __CUDA_ARCH__
+    unsigned long long old = atomicCAS(address, 0ULL, 0ULL);
+    unsigned long long assumed;
+    do {
+        assumed = old;
+        unsigned long long newval = assumed - val; // 无符号减法（模 2^64）
+        old = atomicCAS(address, assumed, newval);
+    } while (old != assumed);
+    return old;
+#else
+    return 0;
+#endif
+}
+
+
 template<typename T, int CAPACITY>
-struct DeviceQueue {
+class DeviceQueue {
+public:
     T data[CAPACITY];
     ull head;
     ull tail;
@@ -54,22 +71,23 @@ struct DeviceQueue {
     }
 
     __device__ bool push(const T &item) {
+#ifdef __CUDA_ARCH__
         const ull old_tail = atomicAdd(&tail, 1ULL);
         const ull current_head = atomicAdd((ull *) &head, 0ULL);
         if (old_tail - current_head >= CAPACITY) {
-            atomicAdd(&tail, -1LL);
+            atomicSubULL(&tail, 1);
             return false;
         }
         int pos = static_cast<int>(old_tail % CAPACITY);
         data[pos] = item;
-
+#endif
         return true;
     }
 
     __host__ bool h_push(const T &item) {
         if (tail - head >= CAPACITY) return false;
 
-        int pos = (int) (tail % CAPACITY);
+        int pos = static_cast<int>(tail % CAPACITY);
 
         data[pos] = item;
 

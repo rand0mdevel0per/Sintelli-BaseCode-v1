@@ -14,10 +14,17 @@ cmake_minimum_required(VERSION 3.18)
 
 if(MSVC)
     add_compile_options(/utf-8)
-    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler=/utf-8")
 endif()
 
-set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -O1 -Wall")
+if (MSVC)
+    add_compile_options(/Zm200)
+endif()
+
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler=\"/Zm200 /bigobj /utf-8\" -v -allow-unsupported-compiler")
+set(CMAKE_VERBOSE_MAKEFILE ON)
+set_property(GLOBAL PROPERTY RULE_MESSAGES ON)
+
+set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -O1 -Wall ")
 
 project(src CXX CUDA)
 
@@ -44,6 +51,10 @@ set(CMAKE_CUDA_ARCHITECTURES native)
 set(CMAKE_CUDA_STANDARD 20)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
+
+if (NOT CMAKE_CUDA_ARCHITECTURES)
+    set(CMAKE_CUDA_ARCHITECTURES "75;80;86;89")
+endif ()
 
 if (CUDAToolkit_FOUND)
     message(STATUS "🎯 CUDA: ${CUDAToolkit_VERSION}")
@@ -73,39 +84,42 @@ endif ()
 # =============================================================================
 
 add_library(src SHARED
-        deviceQueue.cpp
+        deviceQueue.cu
         matrixMultiplex.cu
-        isw.hpp
+        isw.cuh
         cern.cuh
         conv16_res_msg.cuh
-        sct.hpp
-        hasher.h
-        wss.hpp
-        queue.cpp
+        sct.cuh
+        hasher.cuh
+        wss.cuh
+        queue.cu
         NeuronModel.cu
         Neuron.cu
         sim.cu
-        structs.h
-        converter.h
-        converter.cpp
-        bpe_tokenizer.cpp
-        smry.cpp
+        structs.cuh
+        converter.cuh
+        converter.cu
+        bpe_tokenizer.cu
+        smry.cu
         stb_image_write.h
         openai_client.cpp
         openai_client.h
-        logic_semantic_matcher.cpp
+        logic_semantic_matcher.cu
         GPUMutex.cu
-        rag_knowledge_loader.cpp
-        rag_knowledge_loader.h
-        memory_slot.h
-        feature_extractor.cpp
+        rag_knowledge_loader.cu
+        rag_knowledge_loader.cuh
+        memory_slot.cuh
+        feature_extractor.cu
         python_binding.cu
-        external_storage_api.h
-        semantic_query_engine.cpp
-        semantic_query_engine.h
+        external_storage_api.cuh
+        semantic_query_engine.cu
+        semantic_query_engine.cuh
         training_interval.cu
         gpu_containers.cuh
         NeuronOptimize.cu
+        hasher_cu.cuh
+        hasher_impl.cu
+        ffi_bridge.cu
 )
 
 # =============================================================================

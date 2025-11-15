@@ -11,20 +11,20 @@
 #include <cuda_runtime.h>
 #include <thread>
 #include <mutex>
-#include "isw.hpp"
-#include "sct.hpp"
+#include "isw.cuh"
+#include "sct.cuh"
 #include "dslzma.h"
-#include "smry.cpp"
-#include "feature_extractor.h"
-#include "semantic_matcher.h"
-#include "semantic_query_interface.h"
-#include "semantic_matcher.cpp"
-#include "structs.h"  // Contains KFE_STM_Slot definition
-#include "deviceQueue.cpp"  // Contains DeviceQueue template definition
-#include "KFEManager.h"    // KFE storage manager
-#include "memory_slot.h"
+#include "smry.cu"
+#include "feature_extractor.cuh"
+#include "semantic_matcher.cuh"
+#include "semantic_query_interface.cuh"
+#include "semantic_matcher.cu"
+#include "structs.cuh"  // Contains KFE_STM_Slot definition
+#include "deviceQueue.cu"  // Contains DeviceQueue template definition
+#include "KFEManager.cuh"    // KFE storage manager
+#include "memory_slot.cuh"
 #include <Windows.h>
-#include "rag_knowledge_loader.cpp"
+#include "rag_knowledge_loader.cu"
 #include "huggingface_rag_integration.cpp"
 #include <queue>
 
@@ -33,7 +33,7 @@
 #endif
 
 #define ll long long
-#define ull unsigned ll
+#define ull unsigned long long
 
 // Forward declaration of NeuronModel class
 class NeuronModel;
@@ -68,11 +68,19 @@ public:
      * Initializes all required subsystems including E5 model, feature extractors, and storage.
      * @param grid_size Size of the 3D neuron grid (grid_size x grid_size x grid_size)
      */
-    NeuronModel(ull grid_size) : processor(e5), logic_processor(e5), memory_processor(e5), sct_processor(e5),
-                                 cache_processor(e5) {
+    explicit NeuronModel(ull grid_size) : streams(), d_active_flags(nullptr), d_trace(nullptr), processor(e5),
+                                          d_kvc(nullptr), logic_processor(e5), memory_processor(e5), sct_processor(e5),
+                                          cache_processor(e5), score(0), training(false) {
         if (grid_size != 0) {
             GRID_SIZE = grid_size;
         }
+
+        int device;
+        cudaGetDevice(&device);
+        cudaDeviceProp prop{};
+        cudaGetDeviceProperties(&prop, device);
+        printf("[Info] Device: %s\n", prop.name);
+        printf("[Info] Compute Capability: %d.%d\n", prop.major, prop.minor);
 
         // Initialize computation-related constants
         NEURON_COUNT = GRID_SIZE * GRID_SIZE * GRID_SIZE;
@@ -206,10 +214,10 @@ public:
         std::cout << "Distributed neuron system initialization completed!" << std::endl;
     }
 
-    explicit NeuronModel(const std::string &path) : processor(e5), logic_processor(e5), memory_processor(e5),
-                                                    sct_processor(e5), cache_processor(e5) {
-        // Use delegating constructor
-        NeuronModel(2);
+    explicit NeuronModel(const std::string &path) : streams(), d_active_flags(nullptr), d_trace(nullptr),
+                                                    processor(e5), e5(), d_kvc(nullptr), logic_processor(e5),
+                                                    memory_processor(e5), sct_processor(e5), cache_processor(e5),
+                                                    score(0), training(false) {
         path_default = path;
         if (!load(path)) {
             throw std::runtime_error("Failed to load model from path: " + path);
@@ -226,7 +234,6 @@ public:
     bool run() {
         try {
             is_running = true;
-            // 使用正确的线程创建方式
             eventloop = std::thread(&NeuronModel::loop, this);
             eventloop.detach();
             std::cout << "Neuron network is running..." << std::endl;
@@ -239,43 +246,37 @@ public:
     bool save(std::string path = "") {
         if (path.empty()) path = path_default;
         try {
-            // Reset pointers before saving
+            bool is_running_backup = is_running;
+            stop();
             resetPointersForSerialization();
-
-            // 为每个神经元创建主机端数据副本
             std::vector<NeuronData> host_neuron_data(GRID_SIZE * GRID_SIZE * GRID_SIZE);
-
-            // 为每个神经元调用save内核并收集数据
+            std::vector<std::thread> threads;
             for (ull i = 0; i < GRID_SIZE * GRID_SIZE * GRID_SIZE; i++) {
-                // 使用CUDA内核来执行设备操作
-                NeuronData *d_neuron_data;
-                cudaMalloc(&d_neuron_data, sizeof(NeuronData));
-                saveNeuronKernel<<<1, 1>>>(d_neurons, d_neuron_data, i);
-                cudaDeviceSynchronize(); // 等待内核执行完成
-
-                // 将结果从设备内存拷贝到主机内存
-                NeuronData host_data;
-                cudaMemcpy(&host_data, d_neuron_data, sizeof(NeuronData), cudaMemcpyDeviceToHost);
-                host_neuron_data[i] = host_data;
-
-                // 释放设备内存
-                cudaFree(d_neuron_data);
+                auto t = std::thread([this, i, &host_neuron_data] {
+                    NeuronData *d_neuron_data;
+                    cudaMalloc(&d_neuron_data, sizeof(NeuronData));
+                    auto stream_ = cudaStream_t{};
+                    cudaStreamCreate(&stream_);
+                    saveNeuronKernel<<<1, 1, 0, stream_>>>(d_neurons, d_neuron_data, i);
+                    cudaStreamSynchronize(stream_);
+                    cudaStreamDestroy(stream_);
+                    NeuronData host_data;
+                    cudaMemcpy(&host_data, d_neuron_data, sizeof(NeuronData), cudaMemcpyDeviceToHost);
+                    host_neuron_data[i] = host_data;
+                    cudaFree(d_neuron_data);
+                });
+                threads.push_back(std::move(t));
             }
-
-            // 将主机端数据添加到ndata向量中
-            for (const auto &neuron_data: host_neuron_data) {
-                host_neuron_data.push_back(neuron_data);
-            }
-
+            for (auto &t: threads)
+                t.join();
             std::pair<NeuronModel, std::vector<NeuronData> > nmdata;
             nmdata.first.copyFrom(*this);
             nmdata.second = host_neuron_data;
-
-            bool result = Serializer<std::pair<NeuronModel, std::vector<NeuronData> > >::save(nmdata, path);
-
+            const bool result = Serializer<std::pair<NeuronModel, std::vector<NeuronData> > >::save(nmdata, path);
             // Restore pointer connections after saving
             rebuildPointerConnections();
-
+            if (is_running_backup)
+                run();
             return result;
         } catch (...) {
             return false;
@@ -285,14 +286,21 @@ public:
     bool load(std::string path = "") {
         if (path.empty()) path = path_default;
         try {
+            stop();
             std::pair<NeuronModel, std::vector<NeuronData> > nmdata;
             if (!Serializer<std::pair<NeuronModel, std::vector<NeuronData> > >::load(nmdata, path)) {
                 return false;
             }
             this->copyFrom(nmdata.first);
+            std::vector<std::thread> threads;
             for (ull i = 0; i < nmdata.second.size(); i++) {
-                d_neurons[i].load(nmdata.second[i]);
+                auto t = std::thread([this, i, &nmdata] {
+                    d_neurons[i].load(nmdata.second[i]);
+                });
+                threads.push_back(std::move(t));
             }
+            for (auto &t: threads)
+                t.join();
             resetPointersForSerialization();
             rebuildPointerConnections();
             return true;
@@ -417,8 +425,11 @@ public:
         // Inject matching Logic into neuron
         for (const auto &[logic_id, neuron_input]: activated_logics) {
             if (neuron_index >= 0 && neuron_index < GRID_SIZE * GRID_SIZE * GRID_SIZE) {
-                injectNeuronKernel<<<1, 1>>>(d_neurons, neuron_input, neuron_index, port);
+                NeuronInput *d_inp;
+                cudaMemcpy(&d_inp, &neuron_input, sizeof(NeuronInput), cudaMemcpyHostToDevice);
+                injectNeuronKernel<<<1, 1>>>(d_neurons, d_inp, neuron_index, port);
                 cudaDeviceSynchronize();
+                cudaFree(d_inp);
                 std::cout << "Injecting Logic: " << logic_id << " to neuron " << neuron_index
                         << " port " << port << std::endl;
             }
@@ -465,8 +476,11 @@ public:
                 img_inp.from_coord[1] = 0;
                 img_inp.from_coord[2] = 0;
                 img_inp.weight = 1.0;
-                injectNeuronKernel<<<1, 1>>>(d_neurons, img_inp, 0, 1);
+                NeuronInput *d_inp;
+                cudaMemcpy(&d_inp, &img_inp, sizeof(NeuronInput), cudaMemcpyHostToDevice);
+                injectNeuronKernel<<<1, 1>>>(d_neurons, d_inp, 0, 1);
                 cudaDeviceSynchronize();
+                cudaFree(d_inp);
             }
             if (msg.has_text) {
                 processTextString(&processor, "<User:" + role + "> " + msg.text);
@@ -625,7 +639,7 @@ public:
             d_neurons = nullptr;
 #ifdef USE_OPTIMIZED_KERNELS
             // clear
-            for (auto &kvc : h_kvc) {
+            for (auto &kvc: h_kvc) {
                 cudaFree(kvc.k_cache);
                 cudaFree(kvc.v_cache);
             }
@@ -711,9 +725,11 @@ public:
         }
 
         try {
-            // 使用CUDA内核来执行设备操作
-            injectNeuronKernel<<<1, 1>>>(d_neurons, input, neuron_index, port);
-            cudaDeviceSynchronize(); // 等待内核执行完成
+            NeuronInput *d_inp;
+            cudaMemcpy(&d_inp, &input, sizeof(NeuronInput), cudaMemcpyHostToDevice);
+            injectNeuronKernel<<<1, 1>>>(d_neurons, d_inp, neuron_index, port);
+            cudaDeviceSynchronize();
+            cudaFree(d_inp);
             return true;
         } catch (...) {
             return false;
@@ -913,9 +929,11 @@ private:
                 next_inp.from_coord[1] = 0;
                 next_inp.from_coord[2] = 0;
                 next_inp.weight = 1.0;
-                // 使用CUDA内核来执行设备操作
-                injectNeuronKernel<<<1, 1>>>(d_neurons, next_inp, 0, 0);
-                cudaDeviceSynchronize(); // 等待内核执行完成
+                NeuronInput *d_inp;
+                cudaMemcpy(&d_inp, &next_inp, sizeof(NeuronInput), cudaMemcpyHostToDevice);
+                injectNeuronKernel<<<1, 1>>>(d_neurons, d_inp, 0, 0);
+                cudaDeviceSynchronize();
+                cudaFree(d_inp);
                 delete next_matrix;
                 next_matrix = nullptr;
                 delete next_matrix;
@@ -934,8 +952,11 @@ private:
                         logic_inp.from_coord[1] = 0;
                         logic_inp.from_coord[2] = 0;
                         logic_inp.weight = 1.0;
-                        injectNeuronKernel<<<1, 1>>>(d_neurons, logic_inp, 4, i);
+                        NeuronInput *d_inp;
+                        cudaMemcpy(&d_inp, &logic_inp, sizeof(NeuronInput), cudaMemcpyHostToDevice);
+                        injectNeuronKernel<<<1, 1>>>(d_neurons, d_inp, 4, i);
                         cudaDeviceSynchronize();
+                        cudaFree(d_inp);
                     }
                 }
             }
@@ -951,8 +972,11 @@ private:
                         sct_inp.from_coord[1] = 0;
                         sct_inp.from_coord[2] = 0;
                         sct_inp.weight = 1.0;
-                        injectNeuronKernel<<<1, 1>>>(d_neurons, sct_inp, 5, i);
+                        NeuronInput *d_inp;
+                        cudaMemcpy(&d_inp, &sct_inp, sizeof(NeuronInput), cudaMemcpyHostToDevice);
+                        injectNeuronKernel<<<1, 1>>>(d_neurons, d_inp, 5, i);
                         cudaDeviceSynchronize();
+                        cudaFree(d_inp);
                     }
                 }
             }
@@ -968,8 +992,11 @@ private:
                         memory_inp.from_coord[1] = 0;
                         memory_inp.from_coord[2] = 0;
                         memory_inp.weight = 1.0;
-                        injectNeuronKernel<<<1, 1>>>(d_neurons, memory_inp, 6, i);
+                        NeuronInput *d_inp;
+                        cudaMemcpy(&d_inp, &memory_inp, sizeof(NeuronInput), cudaMemcpyHostToDevice);
+                        injectNeuronKernel<<<1, 1>>>(d_neurons, d_inp, 6, i);
                         cudaDeviceSynchronize();
+                        cudaFree(d_inp);
                     }
                 }
             }
@@ -985,8 +1012,11 @@ private:
                         cache_inp.from_coord[1] = 0;
                         cache_inp.from_coord[2] = 0;
                         cache_inp.weight = 1.0;
-                        injectNeuronKernel<<<1, 1>>>(d_neurons, cache_inp, 11, i);
+                        NeuronInput *d_inp;
+                        cudaMemcpy(&d_inp, &cache_inp, sizeof(NeuronInput), cudaMemcpyHostToDevice);
+                        injectNeuronKernel<<<1, 1>>>(d_neurons, d_inp, 11, i);
                         cudaDeviceSynchronize();
+                        cudaFree(d_inp);
                     }
                 }
             }
@@ -1349,8 +1379,7 @@ private:
 
         // 在主机端执行复制操作
         for (ull i = 0; i < GRID_SIZE * GRID_SIZE * GRID_SIZE; i++) {
-            // 使用loadNeuronKernel内核来执行设备操作
-            loadNeuronKernel<<<1, 1>>>(d_neurons, other_temp_neurons[i].host_save(), i);
+            d_neurons[i].load(other.d_neurons[i].host_save());
             cudaDeviceSynchronize(); // 等待内核执行完成
         }
 

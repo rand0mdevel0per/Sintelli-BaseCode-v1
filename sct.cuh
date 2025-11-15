@@ -10,7 +10,7 @@
 #include <cmath>
 #include <algorithm>
 #include <queue>
-#include "deviceQueue.cpp"
+#include "deviceQueue.cu"
 
 // ===== SCT节点定义 =====
 struct SCT_Node {

@@ -1,6 +1,6 @@
-#include "rag_knowledge_loader.h"
-#include "isw.hpp"
-#include "semantic_query_engine.h"
+#include "rag_knowledge_loader.cuh"
+#include "isw.cuh"
+#include "semantic_query_engine.cuh"
 #include <iostream>
 #include <memory>
 

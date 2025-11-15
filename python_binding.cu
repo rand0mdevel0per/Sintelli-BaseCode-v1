@@ -525,7 +525,7 @@ static PyMethodDef NeuronMethods[] = {
     },
 
     {
-        "save_model_from_file", py_save_model, METH_VARARGS,
+        "save_model_to_file", py_save_model, METH_VARARGS,
         "Save model to a .nm2 file\n"
         "\n"
         "Args:\n"
@@ -540,10 +540,10 @@ static PyMethodDef NeuronMethods[] = {
         "Run CUDA C++ side builtin native training\n"
         "\n"
         "Args:\n"
-        "   bing_api_key(str): Bing Custom Search API Key\n"
-        "   google_api_key(str): Google Custom Search API Key\n"
-        "   google_engine_id(str): Google Cloud Engine Id\n"
-        "   openrouter_api_key(str):OpenRouter API Key\n"
+        "   bing_api_key(str): Bing Custom Search API Key [optional]\n"
+        "   google_api_key(str): Google Custom Search API Key [optional]\n"
+        "   google_engine_id(str): Google Cloud Engine Id [optional]\n"
+        "   openrouter_api_key(str):OpenRouter API Key [necessary]\n"
         "\n"
         "Returns:\n"
         "   bool: True if success"
@@ -571,14 +571,14 @@ static PyMethodDef NeuronMethods[] = {
     {nullptr, nullptr, 0, nullptr}
 };
 
-static struct PyModuleDef neuronmodule = {
+static struct PyModuleDef module_main = {
     PyModuleDef_HEAD_INIT,
-    "neuron_model",
+    "sintelli_base",
     "Distributed Neuron Network with streaming output",
     -1,
     NeuronMethods
 };
 
 PyMODINIT_FUNC PyInit_neuron_model(void) {
-    return PyModule_Create(&neuronmodule);
+    return PyModule_Create(&module_main);
 }

@@ -37,10 +37,6 @@ unsigned long long atomic_add_ull_builtin(unsigned long long* ptr, unsigned long
     #endif
 }
 
-ull atomicAdd(ull* ptr, ull value) {
-    return atomic_add_ull_builtin(ptr, static_cast<__int64>(value));
-}
-
 template<typename T, int CAPACITY>
 struct Queue {
     T data[CAPACITY];

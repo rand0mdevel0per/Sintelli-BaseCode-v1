@@ -1,7 +1,7 @@
 // 字符串特征提取器实现
 // 基于E5模型的语义特征提取和匹配
 
-#include "feature_extractor.h"
+#include "feature_extractor.cuh"
 #include <algorithm>
 #include <functional>
 #include <numeric>

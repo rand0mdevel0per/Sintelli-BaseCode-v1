@@ -15,26 +15,28 @@
 #define SRC_NEURON_H
 
 #include <iostream>
-#include "deviceQueue.cpp"
+#include "deviceQueue.cu"
 #include "matrixMultiplex.cu"
 #include <curand_kernel.h>
 #include "cern.cuh"
-#include "isw.hpp"
+#include "isw.cuh"
 #include "conv16_res_msg.cuh"
 #include <cmath>
 #include <sm_20_intrinsics.h>
 #include <vector>
-#include "hasher.h"
-#include "structs.h"
+#include "hasher.cuh"
+#include "structs.cuh"
 #include "sim.cu"
 #include "GPUMutex.cu"
 #include <cuda_fp16.h>
+#include <random>
+
 #include "gpu_containers.cuh"
 #include "cutlass/epilogue/thread/linear_combination.h"
 #include "nlohmann/json.hpp"
 
 #define ll long long
-#define ull unsigned ll
+#define ull unsigned long long
 #define retpc reinterpret_cast
 #define stc static_cast
 #undef atomicAdd
@@ -165,7 +167,7 @@ __global__ void onlineSoftmaxShared(
     int tid = threadIdx.x;
 
     // Phase 1: Find max (numerically stable)
-    float local_max = -INFINITY;
+    float local_max = -FLT_MAX;
     for (int i = tid; i < seq_len; i += blockDim.x) {
         float val = __half2float(attention_scores[row * seq_len + i]);
         local_max = fmaxf(local_max, val);
@@ -500,10 +502,11 @@ public:
 
     static __host__ __device__ double randomInRange(double min, double max) {
 #ifdef __CUDA_ARCH__
-        return curand_uniform_double(&rand_state) * (max - min) + min;
+        curandStatePhilox4_32_10_t rand_state_{};
+        curand_init(45678765, 0, 0, &rand_state_);
+        return curand_uniform_double(&rand_state_) * (max - min) + min;
 #else
         // Host implementation using standard random
-        // 简单的线性同余生成器实现
         static unsigned int seed = 1;
         seed = seed * 1103515245 + 12345;
         double normalized = stc<double>(seed % 1000000) / 1000000.0;
@@ -544,9 +547,15 @@ public:
 
     __host__ __device__ bool is_active() {
         for (auto &port: port_in) {
+#ifdef __CUDA_ARCH__
+            if (!port.empty()) {
+                return true;
+            }
+#else
             if (!port.h_empty()) {
                 return true;
             }
+#endif
         }
         return false;
     }
@@ -1077,10 +1086,10 @@ public:
      *
      * @note Ensure input and convolution kernel memory alignment for performance optimization
      */
-    static __device__ void conv2d_8x8(const double input[256][256],
+    static __host__ __device__ void conv2d_8x8(const double input[256][256],
                                       const ConvKernel &kernel,
                                       double output[32][32]) {
-        /*
+#ifdef __CUDA_ARCH__
         // 256×256 → 32×32 (stride=8, no padding)
         for (int i = 0; i < 32; i++) {
             for (int j = 0; j < 32; j++) {
@@ -1099,7 +1108,7 @@ public:
                 output[i][j] = fmax(0.0, sum + kernel.bias);
             }
         }
-        */
+#else
         cudaStream_t stream;
         cudaStreamCreate(&stream);
         dim3 grid(32, 32);
@@ -1107,6 +1116,7 @@ public:
         conv2d_8x8_kernel<<<grid, block, 0, stream>>>(input, kernel, output);
         cudaStreamSynchronize(stream);
         cudaStreamDestroy(stream);
+#endif
     }
 
     /**
@@ -1127,7 +1137,7 @@ public:
     static __device__ __host__ void deconv2d_8x8(const double input[32][32],
                                                  const ConvKernel &kernel,
                                                  double output[256][256]) {
-        /*
+#ifdef __CUDA_ARCH__
         // 32×32 → 256×256
         memset(output, 0, sizeof(double) * 256 * 256);
 
@@ -1143,7 +1153,7 @@ public:
                 }
             }
         }
-        */
+#else
         cudaStream_t stream;
         cudaStreamCreate(&stream);
         dim3 block(8, 8);
@@ -1154,6 +1164,7 @@ public:
             output);
         cudaStreamSynchronize(stream);
         cudaStreamDestroy(stream);
+#endif
     }
 
     /**
@@ -2552,11 +2563,11 @@ __global__ void update_ema_baseline(double global_score) {
     }
 }
 
-static __global__ void injectNeuronKernel(Neuron *neurons, NeuronInput input, int neuron_index, int port) {
+static __global__ void injectNeuronKernel(Neuron *neurons, const NeuronInput* input, int neuron_index, int port) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (idx == 0) {
-        neurons[neuron_index].inject(input, port);
+        neurons[neuron_index].inject(*input, port);
     }
 }
 
@@ -2569,14 +2580,15 @@ static __global__ void saveNeuronKernel(Neuron *neurons, NeuronData *data, int n
     }
 }
 
-
-static __global__ void loadNeuronKernel(Neuron *neurons, NeuronData data, int neuron_index) {
+/*
+static __global__ void loadNeuronKernel(Neuron *neurons, const NeuronData &data, int neuron_index) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (idx == 0) {
         neurons[neuron_index].load_device(data);
     }
 }
+*/
 
 
 static __global__ void updateNeuronKernel(Neuron *neurons, int neuron_index) {

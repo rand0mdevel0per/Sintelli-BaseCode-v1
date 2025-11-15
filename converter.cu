@@ -2,7 +2,7 @@
 // Created by ASUS on 10/3/2025.
 //
 
-#include "converter.h"
+#include "converter.cuh"
 #include <cmath>
 #include <new>
 

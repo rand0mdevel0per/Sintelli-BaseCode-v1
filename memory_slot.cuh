@@ -5,7 +5,7 @@
 #include <string>
 #include <cstring>
 #include <istream>
-#include "hasher.h"
+#include "hasher.cuh"
 
 /**
  * @brief 记忆槽位结构（存储到ExternalStorage）

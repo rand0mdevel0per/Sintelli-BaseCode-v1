@@ -277,6 +277,7 @@ public:
     }
 
     __device__ void release(int block_id) {
+#ifdef __CUDA_ARCH__
         if (block_id >= 0 && block_id < MAX_BLOCKS) {
             int old_count = atomicSub(&blocks[block_id].ref_count, 1);
             if (old_count == 1) {
@@ -284,6 +285,7 @@ public:
                 atomicAdd(&free_count, 1);
             }
         }
+#endif
     }
 
     __device__ double* get(int block_id) {

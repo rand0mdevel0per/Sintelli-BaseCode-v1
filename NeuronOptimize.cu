@@ -6,7 +6,7 @@
 #ifdef USE_OPTIMIZED_KERNELS
 
 #define ll long long
-#define ull unsigned ll
+#define ull unsigned long long
 #include "Neuron.cu"
 #include <mma.h>
 #include <cuda_fp16.h>
@@ -34,7 +34,7 @@ __device__ T *allocate(T *pool, ull &count, ull pool_size, ull request_size) {
         atomicAdd(&count, -request_size);
         return nullptr;
     }
-    return retpc<T[request_size]>(&pool[idx - request_size]);
+    return retpc<T *>(&pool[idx - request_size]);
 }
 
 template<typename T>
@@ -51,7 +51,7 @@ __device__ T *get_shared(T *shared_pool, ull request_id, ull *share_sizes, ull *
     for (int i = 0; i < request_id; i++) {
         idx += share_sizes[i];
     }
-    return retpc<T[share_sizes[request_id]]>(&shared_pool[idx]);
+    return retpc<T *>(&shared_pool[idx]);
 }
 
 template<typename T>
@@ -108,7 +108,7 @@ __device__ T *get_shared(
 
     ull offset = share_offsets[share_id];
 
-    return reinterpret_cast<T *>(&shared_pool[offset]);
+    return retpc<T *>(&shared_pool[offset]);
 }
 
 template<typename T>
@@ -122,12 +122,12 @@ __device__ T *alloc_shared(T *shared_pool, ull &count, ull pool_size, ull reques
     share_id = (share_id != 0) ? atomicAdd(&share_counts, 1) : share_id;
     share_ref_counts[share_id] = 1;
     share_sizes[share_id] = request_size;
-    return retpc<T[request_size]>(&shared_pool[idx]);
+    return retpc<T *>(&shared_pool[idx]);
 }
 
 template<typename T>
 __device__ T *release_shared(T *ptr, ull &count, ull request_id, ull *share_sizes, ull *share_ref_counts) {
-    atomicAdd(&share_ref_counts[request_id], -1);
+    atomicSubULL(&share_ref_counts[request_id], 1);
     if (share_ref_counts[request_id] <= 0) {
         ull size = share_sizes[request_id];
         atomicAdd(&count, -size);
@@ -813,8 +813,8 @@ __device__ __forceinline__ void tensorCoreGEMM(
         if (idx < 256 * 256) {
             int row = idx / 256;
             int col = idx % 256;
-            P_half[idx] = __double2half_rn(n.P_Matrix[row][col]);
-            W_half[idx] = __double2half_rn(n.W_predict[row][col]);
+            P_half[idx] = __float2half_rn(n.P_Matrix[row][col]);
+            W_half[idx] = __float2half_rn(n.W_predict[row][col]);
         }
     }
     __syncthreads();

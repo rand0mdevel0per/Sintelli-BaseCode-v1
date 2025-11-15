@@ -11,7 +11,7 @@
 #include <chrono>
 #include <functional>
 #include <mutex>
-#include "semantic_matcher.h"
+#include "semantic_matcher.cuh"
 
 // 缓存条目结构
 struct CachedQueryResult {

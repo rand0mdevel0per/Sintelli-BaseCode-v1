@@ -12,12 +12,12 @@
 #include <sstream>
 #include <optional>
 #include "openai_client.h"
-#include "semantic_query_interface.h"
-#include "semantic_matcher.h"
-#include "isw.hpp"
-#include "semantic_query_engine.h"
-#include "structs.h"  // 包含NeuronInput定义
-#include "hasher.h"
+#include "semantic_query_interface.cuh"
+#include "semantic_matcher.cuh"
+#include "isw.cuh"
+#include "semantic_query_engine.cuh"
+#include "structs.cuh"  // 包含NeuronInput定义
+#include "hasher.cuh"
 
 // 知识库条目结构
 struct KnowledgeEntry {

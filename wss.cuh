@@ -14,7 +14,7 @@
 #include <map>
 #include <memory>
 #include <iterator>
-#include "queue.cpp"
+#include "queue.cu"
 
 using namespace std;
 

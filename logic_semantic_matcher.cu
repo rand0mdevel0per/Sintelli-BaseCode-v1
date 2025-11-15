@@ -1,7 +1,7 @@
 // Logic语义匹配器实现
 // 专门用于Logic的召回和注入
 
-#include "semantic_matcher.h"
+#include "semantic_matcher.cuh"
 #include <algorithm>
 #include <functional>
 

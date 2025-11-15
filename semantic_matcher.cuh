@@ -9,9 +9,9 @@
 #include <unordered_map>
 #include <memory>
 #include <functional>
-#include "feature_extractor.h"
-#include "isw.hpp"
-#include "structs.h"
+#include "feature_extractor.cuh"
+#include "isw.cuh"
+#include "structs.cuh"
 
 // 语义匹配结果
 struct SemanticMatch {

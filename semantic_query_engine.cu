@@ -1,5 +1,6 @@
-#include "semantic_query_engine.h"
-#include "smry.cpp"  // 包含E5模型实现
+#include "semantic_query_engine.cuh"
+#include "isw.cuh"  // FeatureVector的完整定义
+#include "smry.cu"  // 包含E5模型实现
 #include <algorithm>
 #include <limits>
 #include <cmath>
@@ -18,9 +19,8 @@ SemanticQueryEngine::SemanticQueryEngine(const std::string& model_path,
 }
 
 SemanticQueryEngine::~SemanticQueryEngine() {
-    // 清理E5模型资源
     if (e5_model_) {
-        // 注意：实际清理需要根据E5模型的具体实现来处理
+        static_cast<E5LargeModel*>(e5_model_)->~E5LargeModel();
         e5_model_ = nullptr;
     }
 }
@@ -29,7 +29,6 @@ bool SemanticQueryEngine::initialize(const std::string& model_path,
                                    const std::string& vocab_path,
                                    const std::string& merges_path,
                                    const std::string& special_tokens_path) {
-    // 初始化E5模型
     is_initialized_ = initUnifiedSystem(model_path.c_str(), 
                                        vocab_path.c_str(), 
                                        merges_path.c_str(), 

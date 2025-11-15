@@ -18,11 +18,17 @@
 #define SRC_STRUCTS_H
 
 #define ll long long
-#define ull unsigned ll
+#define ull unsigned long long
 
 #include "conv16_res_msg.cuh"
-#include "hasher.h"
+#include "hasher.cuh"
 #include <string>
+#include "deviceQueue.cu"
+
+template <typename T, int CAPACITY> class DeviceQueue;
+struct FullMessage;
+struct ConvMessage;
+struct ResidualMessage;
 
 /**
  * @struct KFE_STM_Slot
@@ -60,14 +66,7 @@ struct KFE_STM_Slot {
     double conv16[16][16]; // 16x16 convolution features
     
     __host__ __device__ std::string hash() const {
-#ifdef __CUDA_ARCH__
-        // 在设备端使用简化的hash方法
-        char hash_buffer[64];
-        sprintf(hash_buffer, "KFE_%d_%f", Rcycles, Ulocal + Icore);
-        return std::string(hash_buffer);
-#else
         return sha256_hash<KFE_STM_Slot>(*this);
-#endif
     }
 
     __device__ void conv() {
@@ -258,8 +257,10 @@ struct ConnectionInfo {
 
 struct NeuronData {
     // ===== 端口系统(4个逻辑端口) =====
+    /*
     DeviceQueue<NeuronInput, 1024> port_in[4]{};
     DeviceQueue<NeuronInput, 1024> port_out[4]{};
+    */
     ll port_counts[4]{}; // 每个端口的连接数
 
     // ===== 连接信息 =====

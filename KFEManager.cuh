@@ -16,8 +16,8 @@
 #ifndef SRC_KFEMANAGER_H
 #define SRC_KFEMANAGER_H
 
-#include "structs.h"
-#include "deviceQueue.cpp"
+#include "structs.cuh"
+#include "deviceQueue.cu"
 #include <unordered_map>
 #include <thread>
 #include <atomic>
