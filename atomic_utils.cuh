@@ -3,7 +3,8 @@
  * @brief Unified atomic operations for CUDA and host code
  * 
  * Provides consistent atomic operations across different compilers
- * and platforms (CUDA device, MSVC host, GCC/Clang host)
+ * and platforms. CUDA device code uses built-in atomicAdd,
+ * while host code uses compiler-specific intrinsics.
  */
 
 #ifndef ATOMIC_UTILS_CUH
@@ -18,7 +19,10 @@
 #define ll long long
 #define ull unsigned long long
 
-// Atomic add implementation for host code (non-CUDA)
+// Host-side atomicAdd implementation (only when NOT in CUDA device code)
+#ifndef __CUDA_ARCH__
+
+// Helper function for host atomic add
 inline ull atomic_add_ull_host(ull *ptr, ull value) {
 #if defined(__GNUC__) || defined(__clang__)
     return __sync_fetch_and_add(ptr, value);
@@ -34,14 +38,17 @@ inline ull atomic_add_ull_host(ull *ptr, ull value) {
 #endif
 }
 
-// Host-side wrapper for atomicAdd (only when not in device code)
-#ifndef __CUDA_ARCH__
+// Host-side wrapper - only define if not in device code and if not already defined
+#ifndef atomicAdd
 inline ull atomicAdd(ull *ptr, ull value) {
     return atomic_add_ull_host(ptr, value);
 }
 #endif
 
+#endif // __CUDA_ARCH__
+
 // Device-side atomic subtract for unsigned long long
+// This is safe to define as CUDA doesn't provide built-in atomicSub for ull
 __device__ __forceinline__ unsigned long long atomicSubULL(unsigned long long* address, unsigned long long val) {
 #ifdef __CUDA_ARCH__
     unsigned long long old = atomicCAS(address, 0ULL, 0ULL);
