@@ -88,7 +88,6 @@ jobs:
   build-windows:
     name: Build on Windows
     runs-on: windows-latest
-    needs: code-quality
 
     steps:
       - name: Checkout Code
@@ -139,7 +138,6 @@ jobs:
     name: Build on Linux
     runs-on: ubuntu-latest
     container: nvidia/cuda:13.0.2-devel-ubuntu22.04
-    needs: code-quality
 
     steps:
       - name: Checkout Code
