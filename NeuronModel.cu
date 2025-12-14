@@ -73,7 +73,10 @@ public:
      * @param grid_size Size of the 3D neuron grid (grid_size x grid_size x grid_size)
      */
     explicit NeuronModel(ull grid_size) : streams(), d_active_flags(nullptr), d_trace(nullptr), processor(e5),
-                                          d_kvc(nullptr), logic_processor(e5), memory_processor(e5), sct_processor(e5),
+#ifdef USE_OPTIMIZED_KERNELS
+                                          d_kvc(nullptr),
+#endif
+                                          logic_processor(e5), memory_processor(e5), sct_processor(e5),
                                           cache_processor(e5), score(0), training(false) {
         if (grid_size != 0) {
             GRID_SIZE = grid_size;
@@ -113,7 +116,7 @@ public:
 #endif
 
         cudaMalloc(&d_active_flags, NEURON_COUNT * sizeof(bool));
-        for (auto & stream : streams) {
+        for (auto &stream: streams) {
             cudaStreamCreate(&stream);
         }
 
@@ -219,7 +222,11 @@ public:
     }
 
     explicit NeuronModel(const std::string &path) : streams(), d_active_flags(nullptr), d_trace(nullptr),
-                                                    processor(e5), e5(), d_kvc(nullptr), logic_processor(e5),
+                                                    processor(e5), e5(),
+#ifdef USE_OPTIMIZED_KERNELS
+                                                    d_kvc(nullptr),
+#endif
+                                                    logic_processor(e5),
                                                     memory_processor(e5), sct_processor(e5), cache_processor(e5),
                                                     score(0), training(false) {
         path_default = path;
@@ -1043,6 +1050,7 @@ private:
                     count
                 );
             }
+            ull blocks = NEURON_COUNT * 4;
 #else
             cudaMemcpy(d_kvc, h_kvc.data(), NEURON_COUNT * sizeof(KVCache),
                        cudaMemcpyHostToDevice);
@@ -1050,7 +1058,7 @@ private:
             double *d_pool;
             cudaMalloc(&d_pool, pool_size * sizeof(double));
             cudaMemset(d_pool, 0, pool_size * sizeof(double));
-            ull blocks = NEURON_COUNT * 4;
+
             ull threads = 1024;
             ull neurons_per_stream = NEURON_COUNT / 4;
             for (int i = 0; i < 4; i++) {

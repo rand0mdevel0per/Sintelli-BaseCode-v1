@@ -7,9 +7,6 @@
  */
 #pragma once
 
-#ifndef SRC_NEURON_OPTIMIZE_CUH
-#define SRC_NEURON_OPTIMIZE_CUH
-
 #ifdef USE_OPTIMIZED_KERNELS
 
 #define ll long long

@@ -124,6 +124,12 @@ add_library(src SHARED
         string_utils.h
         string_utils.cpp
         string_utils.h
+        feature_extractor.h
+        smry.h
+        semantic_query_engine.cpp
+        external_storage_api.h
+        semantic_matcher.h
+        rag_knowledge_loader.h
 )
 
 # =============================================================================
@@ -146,7 +152,7 @@ target_compile_definitions(src
 
 target_compile_definitions(src
         PRIVATE
-        USE_OPTIMIZED_KERNELS
+        # USE_OPTIMIZED_KERNELS
 )
 
 # =============================================================================

@@ -1,7 +1,7 @@
 #ifndef EXTERNAL_STORAGE_API_H
 #define EXTERNAL_STORAGE_API_H
 
-#include "isw.hpp"
+#include "isw_fwd.h"
 #include "rag_knowledge_loader.h"
 #include <string>
 #include <vector>

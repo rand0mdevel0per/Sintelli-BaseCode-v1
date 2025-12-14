@@ -10,7 +10,7 @@
 #include <memory>
 #include <functional>
 #include "feature_extractor.h"
-#include "isw.hpp"
+#include "isw_fwd.h"
 #include "structs.h"
 
 // 语义匹配结果
@@ -313,3 +313,4 @@ public:
 };
 
 #endif // SEMANTIC_MATCHER_H
+

@@ -2,7 +2,7 @@
 
 #include "semantic_query_engine.cuh"
 #include "isw.cuh"  // FeatureVector的完整定义
-#include "smry.cu"  // 包含E5模型实现
+#include "smry.cu"  // 包含E5模型实现 in implementation TU only
 #include <algorithm>
 #include <limits>
 #include <cmath>

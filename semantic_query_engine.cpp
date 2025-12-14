@@ -1,5 +1,5 @@
 #include "semantic_query_engine.h"
-#include "smry.cpp"  // 包含E5模型实现
+#include "smry.h"  // 引用模型API头，不包含实现
 #include <algorithm>
 #include <limits>
 #include <cmath>

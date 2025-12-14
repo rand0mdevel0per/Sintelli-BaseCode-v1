@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 #include <memory>
-#include "isw.hpp"
+#include "isw_fwd.h"
 
 // 语义查询引擎 - 独立的语义处理类，使用smry.cpp中的E5模型
 class SemanticQueryEngine {

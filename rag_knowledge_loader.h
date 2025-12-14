@@ -14,7 +14,7 @@
 #include "openai_client.h"
 #include "semantic_query_interface.h"
 #include "semantic_matcher.h"
-#include "isw.hpp"
+#include "isw_fwd.h"
 #include "semantic_query_engine.h"
 #include "structs.h"  // 包含NeuronInput定义
 

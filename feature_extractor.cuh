@@ -5,8 +5,8 @@
 
 #include <string>
 #include <vector>
-#include "smry.cu"
-#include "isw.cuh"
+#include "smry.h"
+#include "isw_fwd.h"
 
 class FeatureExtractor {
 private:

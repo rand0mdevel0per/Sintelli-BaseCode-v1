@@ -23,8 +23,10 @@
 #include <codecvt>
 #include <locale>
 #include <optional>
-#include "smry.cpp"
+#include "smry.h"
 #include "semantic_query_engine.h"
+
+class SemanticQueryEngine;
 
 // ===== 存储层级枚举 =====
 enum StorageTier {
@@ -1263,3 +1265,4 @@ private:
 };
 
 #endif // GENERIC_EXTERNAL_STORAGE_H
+

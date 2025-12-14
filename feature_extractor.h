@@ -1,13 +1,10 @@
-// 字符串特征提取器头文件
-// 基于现有E5模型的语义特征提取接口
-
 #ifndef FEATURE_EXTRACTOR_H
 #define FEATURE_EXTRACTOR_H
 
 #include <string>
 #include <vector>
-#include "smry.cpp"
-#include "isw.hpp"
+#include "smry.h"
+#include "isw_fwd.h"
 
 class FeatureExtractor {
 private:
