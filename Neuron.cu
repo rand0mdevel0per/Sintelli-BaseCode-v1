@@ -31,6 +31,8 @@
 #include "cutlass/epilogue/thread/linear_combination.h"
 #include "nlohmann/json.hpp"
 
+#define PI 3.14159265358979323846
+
 #define ll long long
 #define ull unsigned long long
 #define retpc reinterpret_cast

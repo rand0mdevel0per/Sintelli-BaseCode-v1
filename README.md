@@ -9,7 +9,9 @@
 
 ## Overview
 
-This is a CUDA-based neural network simulation project designed to build a large-scale neuronal network in three-dimensional space. The project leverages GPU parallel computing capabilities to simulate neuron behavior, connections, and information transmission.
+This is a CUDA-based neural network simulation project designed to build a large-scale neuronal network in
+three-dimensional space. The project leverages GPU parallel computing capabilities to simulate neuron behavior,
+connections, and information transmission.
 
 ## Key Features
 
@@ -26,11 +28,11 @@ This is a CUDA-based neural network simulation project designed to build a large
 - **Build System**: CMake (minimum version 3.18)
 - **Dependency Management**: vcpkg
 - **CUDA Architecture**: Supports modern GPU architectures (sm_75, sm_80, sm_86, sm_89)
-- **Third-party Libraries**: 
-  - CUTLASS (CUDA-optimized GEMM operations)
-  - LibLZMA (data compression)
-  - nlohmann/json (JSON processing)
-  - Crow (C++ web framework)
+- **Third-party Libraries**:
+    - CUTLASS (CUDA-optimized GEMM operations)
+    - LibLZMA (data compression)
+    - nlohmann/json (JSON processing)
+    - Crow (C++ web framework)
 
 ## Directory Structure
 
@@ -58,36 +60,43 @@ Implementation of a complex neuron model that simulates biological neural comput
 
 Each neuron in the network is represented by the `Neuron` class, which contains:
 
-- **3D Spatial Positioning**: Each neuron has coordinates (x, y, z) in a 3D grid, enabling spatial organization and locality-based connections
-- **6-Directional Neighbor Connections**: Neurons can connect to neighbors in ±X, ±Y, and ±Z directions, forming a 3D lattice structure
-- **4-Logical Port I/O System**: Each neuron has 4 logical ports for input and output, enabling multi-channel communication
+- **3D Spatial Positioning**: Each neuron has coordinates (x, y, z) in a 3D grid, enabling spatial organization and
+  locality-based connections
+- **6-Directional Neighbor Connections**: Neurons can connect to neighbors in ±X, ±Y, and ±Z directions, forming a 3D
+  lattice structure
+- **4-Logical Port I/O System**: Each neuron has 4 logical ports for input and output, enabling multi-channel
+  communication
 - **KFE Short-Term Memory System**: A knowledge feature encoding system for contextual memory and learning
 - **Convolution and GEMM Inference**: Support for both convolutional and matrix multiplication-based computations
 - **Port Transformation Matrices**: Hebbian learning-based matrices for feature transformation between ports
 
 #### Core Computational Flow
 
-The neuron's computation follows this flow in the `step()` function:
+The implementation has been refactored to decouple lightweight I/O and routing from heavy matrix compute so that
+message handling remains low-latency and heavy GEMM/DRC kernels can be scheduled without blocking message paths.
+The high-level runtime phases are:
 
-1. **Message Processing**: Handle incoming messages from other neurons
-   - Process messages from queue using `processMessage()`
-   - Route or receive data messages
-   - Forward or reply to connection requests
+- Message intake & dispatch (host / lightweight): Incoming messages are accepted and pre-processed on the host or
+  a lightweight GPU path. Routing, metadata parsing, and fast-path decisions are performed outside heavy kernels so
+  message handling does not block compute-intensive work.
+- Input aggregation (per-step, parallel): Per-port inputs are aggregated on the GPU using compact reduction kernels
+  and shared memory. These kernels are scheduled on worker streams to allow concurrency.
+- Compute selection (decision point): Each neuron decides whether to run a micro-correction (fast path) or to
+  schedule a deferred heavy computation (GEMM+DRC). This decision aims to avoid unnecessary expensive work.
+- Deferred heavy compute (GEMM/DRC): Large matrix multiplies and iterative corrections are executed on dedicated
+  CUDA streams (a compute stream pool) so they can run concurrently with message I/O and other kernels. Deferred
+  tasks may be scheduled to lower-priority or separate streams to allow overlap and reduce end-to-end latency.
+- Output packaging & routing (async): Outputs are packaged and enqueued asynchronously; enqueuing and routing use
+  atomic operations and non-blocking queues so they do not stall the main computation streams.
+- Maintenance & housekeeping (periodic): Decay/KFE maintenance, kernel updates, and discovery tasks run on coarse
+  intervals and are scheduled to avoid interfering with the fast path.
 
-2. **Input Processing**: Process data from input ports
-   - For each port with input data, execute `processUpdate()`
-   - Proceed to output broadcast only if there was input
+For exact call order, kernel names, and current behavior consult `Neuron.cu` and `NeuronModel.cu` — those files are the
+authoritative source for the runtime flow. The primary change since earlier versions is explicit use of multiple
+CUDA streams and a compute task queue so that heavy GEMM/DRC work can be overlapped with message processing.
 
-3. **Output Broadcast**: Send results to connected neurons
-   - Create and route output messages for each output connection
-   - Update convolution kernels for all ports
-
-4. **Maintenance**: Update internal state and perform housekeeping
-   - Increment cycle counter
-   - Perform KFE decay every 10 steps
-   - Initiate neuron discovery every 100 steps (when activity > 0.3 and output connections < 1024)
-   - Update multiplex matrices every 50 steps
-   - Update neuron activity
+> NOTE: This README provides a concise overview of the stream-based flow; prefer the source files as the
+> authoritative reference when refactoring includes or changing call sites.
 
 #### Detailed Computational Algorithms
 
@@ -96,56 +105,57 @@ The neuron's computation follows this flow in the `step()` function:
 The `processUpdate()` function is the core of neuron computation:
 
 1. **Neighbor Input Aggregation**:
-   - Reset `PS_aggregate` matrix to zero
-   - For each of the 4 ports with input:
-     - Retrieve input from port queue
-     - Transform input using `input_multiplex_array`
-     - Extract convolution features via `extractConvFeatures()`
-     - Calculate attention score
-     - Aggregate features using `aggregateFeatures()`
-     - Weight and accumulate in `PS_aggregate`
+    - Reset `PS_aggregate` matrix to zero
+    - For each of the 4 ports with input:
+        - Retrieve input from port queue
+        - Transform input using `input_multiplex_array`
+        - Extract convolution features via `extractConvFeatures()`
+        - Calculate attention score
+        - Aggregate features using `aggregateFeatures()`
+        - Weight and accumulate in `PS_aggregate`
 
 2. **Normalization**:
-   - Normalize `PS_aggregate` by total weight if weight_sum > 1e-6
+    - Normalize `PS_aggregate` by total weight if weight_sum > 1e-6
 
 3. **Deviation Calculation**:
-   - Compute prediction error: `Deviation[i][j] = PS_aggregate[i][j] - P_stable[i][j]`
+    - Compute prediction error: `Deviation[i][j] = PS_aggregate[i][j] - P_stable[i][j]`
 
 4. **Selective SSM**:
-   - Execute `selectiveSSM()` for state space modeling
+    - Execute `selectiveSSM()` for state space modeling
 
 5. **KFE Attention Computation**:
-   - Compute STM aggregate utility using `computeKFEAttention()`
+    - Compute STM aggregate utility using `computeKFEAttention()`
 
 6. **Gating Decision**:
-   - Determine whether to trigger GEMM based on:
-     - Periodic heartbeat (every 16 steps)
-     - High external demand (deviation_norm > 0.5)
-     - Internal crisis (core_vulnerability > 0.7)
-     - High internal attention (STM_aggregate_utility > 0.6)
-   - Execute either `executeGEMMAndDRC()` or `executeMicroCorrection()`
+    - Determine whether to trigger GEMM based on:
+        - Periodic heartbeat (every 16 steps)
+        - High external demand (deviation_norm > 0.5)
+        - Internal crisis (core_vulnerability > 0.7)
+        - High internal attention (STM_aggregate_utility > 0.6)
+    - Execute either `executeGEMMAndDRC()` or `executeMicroCorrection()`
 
 7. **Output Broadcasting**:
-   - Execute `broadcastOutput()`
-   - Update convolution kernels for all ports via `updateConvKernels()`
+    - Execute `broadcastOutput()`
+    - Update convolution kernels for all ports via `updateConvKernels()`
 
 ##### GEMM Inference with DRC
 
-The neuron's core computation uses General Matrix Multiply (GEMM) operations with Dynamic Recalibration Correction (DRC):
+The neuron's core computation uses General Matrix Multiply (GEMM) operations with Dynamic Recalibration Correction (
+DRC):
 
 1. **Positional Encoding**:
-   - Add positional encoding to `P_Matrix` using `addPositionalEncoding()`
+    - Add positional encoding to `P_Matrix` using `addPositionalEncoding()`
 
 2. **GEMM Core Inference**:
    ```
    P_Next = GELU(P_Matrix × W_predict + M_KFE)
    ```
-   
+
    Where:
-   - `P_Matrix`: Current state matrix (256×256)
-   - `W_predict`: Autoregressive weight matrix (256×256)
-   - `M_KFE`: Knowledge context matrix from KFE (256×256)
-   - GELU: Gaussian Error Linear Unit activation function
+    - `P_Matrix`: Current state matrix (256×256)
+    - `W_predict`: Autoregressive weight matrix (256×256)
+    - `M_KFE`: Knowledge context matrix from KFE (256×256)
+    - GELU: Gaussian Error Linear Unit activation function
 
 3. **Fixed Target Computation**:
    ```
@@ -156,19 +166,19 @@ The neuron's core computation uses General Matrix Multiply (GEMM) operations wit
    ```
    P_new = P_current + V_corr + M_attn + V_hist
    ```
-   
+
    Where:
-   - `V_corr = (T_fixed - P_current) · η_base`: Basic correction term
-   - `M_attn`: Attention-modulated correction
-   - `V_hist`: Historical momentum term
+    - `V_corr = (T_fixed - P_current) · η_base`: Basic correction term
+    - `M_attn`: Attention-modulated correction
+    - `V_hist`: Historical momentum term
 
 5. **Noise Prediction and Denoising**:
-   - Predict noise using `predictNoise()`
-   - Apply denoising with cosine noise schedule
+    - Predict noise using `predictNoise()`
+    - Apply denoising with cosine noise schedule
 
 6. **State Synchronization**:
-   - Copy `P_current` to `P_Matrix` and `P_stable`
-   - Update core vulnerability via `updateCoreVulnerability()`
+    - Copy `P_current` to `P_Matrix` and `P_stable`
+    - Update core vulnerability via `updateCoreVulnerability()`
 
 ##### Selective State Space Model (SSM)
 
@@ -206,13 +216,13 @@ The neuron implements 8×8 convolution operations with stride=8 for feature extr
    ```
 
 3. **Feature Aggregation**:
-   - Deconvolve 8 feature maps
-   - Weighted fusion: `output[i][j] = Σ(temp_outputs[k][i][j]) / 8.0`
+    - Deconvolve 8 feature maps
+    - Weighted fusion: `output[i][j] = Σ(temp_outputs[k][i][j]) / 8.0`
 
 4. **Kernel Update**:
-   - Compute gradients using feature maps and deviation
-   - Update weights: `kernel[ki][kj] -= learning_rate · grad / (32² )`
-   - Update bias: `bias -= learning_rate · bias_grad / (32²)`
+    - Compute gradients using feature maps and deviation
+    - Update weights: `kernel[ki][kj] -= learning_rate · grad / (32² )`
+    - Update bias: `bias -= learning_rate · bias_grad / (32²)`
 
 ##### Attention Mechanisms
 
@@ -247,7 +257,8 @@ Neurons communicate through adaptive message passing with three compression mode
 2. **MODE_RESIDUAL**: Residual compression transmission
 3. **MODE_CONV_ONLY**: Convolution feature transmission only
 
-Messages are routed greedily in 3D space based on destination coordinates.
+Messages are routed greedily in 3D space based on destination coordinates. Enqueueing and delivery are asynchronous
+and designed to work with the multi-stream scheduling described above.
 
 ### 2. Device Queue (deviceQueue.cpp)
 
@@ -297,17 +308,20 @@ The main processing loop executes neuron computations in parallel:
 
 ### 4. Encoding/Decoding System (converter.h/cpp)
 
-Matrix to UTF-8 string encoding for data storage and transmission, using a custom encoding scheme that preserves numerical precision while reducing storage requirements.
+Matrix to UTF-8 string encoding for data storage and transmission, using a custom encoding scheme that preserves
+numerical precision while reducing storage requirements.
 
 ## Build and Run
 
 ### Requirements
-- CUDA Toolkit (11.x or 12.x recommended)
+
+- CUDA Toolkit (11.8+ recommended; CUDA 12.x is also supported)
 - C++20-capable compiler (Visual Studio 2022 recommended for Windows)
 - CMake 3.18+
 - vcpkg package manager
 
 ### Build Steps
+
 ```bash
 # Configure with Visual Studio generator
 cmake -B cmake-build-debug -S . -G "Visual Studio 17 2022"
@@ -321,9 +335,12 @@ cmake --build build
 ```
 
 ### Usage
-Use the `sintelliv1` Python package to interact with the model:
 
-```python
+Use the `sintelliv1` Python package to interact with the model (the Python API is a thin wrapper around the native
+model runtime). The example below is illustrative and should be run in an environment where `sintelliv1` is
+installed and available:
+
+```text
 import sintelliv1.sintelli_base as sintelli
 
 # Create and start model
@@ -342,20 +359,24 @@ sintelli.stop_model()
 sintelli.destroy_model()
 ```
 
-## Development Guidelines
+## Developer notes
 
-1. **CUDA Programming**: Use modern CUDA practices including unified memory, streams, and asynchronous operations
-2. **Memory Management**: Manual memory management; avoid STL containers like `std::string` that may have device-side issues
-3. **Error Handling**: Use CUDA error checking macros to ensure correctness
-4. **Code Style**: Follow C++ Core Guidelines; use clang-format for formatting
-5. **Naming Conventions**: 
-   - Classes: PascalCase (e.g., `NeuronModel`)
-   - Functions/variables: snake_case (e.g., `process_update`)
-   - Macros: UPPER_SNAKE_CASE (e.g., `CUDA_CHECK`)
+- Option B (internal public API): The project uses an internal-first policy for the public API surface — public
+  headers are not installed as a system-wide SDK. This keeps the API internal to the repository and reduces the
+  chance of accidental, unstable external usage.
+
+  If you rely on editor features (e.g., clangd) and see unresolved symbols or missing includes, ensure your editor
+  is configured to read the project's compile database (`compile_commands.json`) and the repository include paths
+  (the file is present in the repo). This avoids diagnostic noise while keeping the API internal. If you prefer a
+  thin, forward-declared shim header for local development, add it in `include/` or configure your `.clangd` to
+  point to the repo headers instead of an installed SDK.
+
+- Minimal edits: This README was intentionally kept concise; refer to source files for implementation details.
 
 ## Contributing
 
 Contributions are welcome! Please:
+
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes with tests

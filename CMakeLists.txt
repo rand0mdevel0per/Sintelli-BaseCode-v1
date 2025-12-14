@@ -130,6 +130,8 @@ add_library(src SHARED
         external_storage_api.h
         semantic_matcher.h
         rag_knowledge_loader.h
+        bpe_tokenizer.cpp
+        converter.cpp
 )
 
 # =============================================================================

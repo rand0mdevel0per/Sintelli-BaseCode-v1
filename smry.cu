@@ -36,7 +36,7 @@ constexpr int MAT_SIZE = 256;
 constexpr int MAT_ELEMENTS = MAT_SIZE * MAT_SIZE;
 constexpr int EMBED_DIM = 1024;
 constexpr int MAX_SEQ_LENGTH = 512;
-constexpr double PI = 3.14159265358979323846;
+constexpr double pi = 3.14159265358979323846;
 
 // ============ 基础数据结构 ============
 struct Matrix256 {
@@ -282,7 +282,7 @@ void dct2d(const double *input, double *output, int size) {
             double sum = 0.0;
             double cu = (u == 0) ? sqrt(1.0 / size) : sqrt(2.0 / size);
             for (int x = 0; x < size; x++) {
-                sum += input[i * size + x] * cos(PI * u * (2 * x + 1) / (2.0 * size));
+                sum += input[i * size + x] * cos(pi * u * (2 * x + 1) / (2.0 * size));
             }
             temp[i * size + u] = cu * sum;
         }
@@ -293,7 +293,7 @@ void dct2d(const double *input, double *output, int size) {
             double sum = 0.0;
             double cv = (v == 0) ? sqrt(1.0 / size) : sqrt(2.0 / size);
             for (int y = 0; y < size; y++) {
-                sum += temp[y * size + j] * cos(PI * v * (2 * y + 1) / (2.0 * size));
+                sum += temp[y * size + j] * cos(pi * v * (2 * y + 1) / (2.0 * size));
             }
             output[v * size + j] = cv * sum;
         }
@@ -310,7 +310,7 @@ void idct2d(const double *input, double *output, int size) {
             double sum = 0.0;
             for (int u = 0; u < size; u++) {
                 double cu = (u == 0) ? sqrt(1.0 / size) : sqrt(2.0 / size);
-                sum += cu * input[i * size + u] * cos(PI * u * (2 * x + 1) / (2.0 * size));
+                sum += cu * input[i * size + u] * cos(pi * u * (2 * x + 1) / (2.0 * size));
             }
             temp[i * size + x] = sum;
         }
@@ -321,7 +321,7 @@ void idct2d(const double *input, double *output, int size) {
             double sum = 0.0;
             for (int v = 0; v < size; v++) {
                 double cv = (v == 0) ? sqrt(1.0 / size) : sqrt(2.0 / size);
-                sum += cv * temp[v * size + j] * cos(PI * v * (2 * y + 1) / (2.0 * size));
+                sum += cv * temp[v * size + j] * cos(pi * v * (2 * y + 1) / (2.0 * size));
             }
             output[y * size + j] = sum;
         }

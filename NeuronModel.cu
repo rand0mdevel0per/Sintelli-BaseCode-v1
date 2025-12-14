@@ -32,6 +32,9 @@
 // External libraries
 #include "rag_knowledge_loader.cuh"
 
+// Include E5/SMRY implementation for definitions used in this .cu TU
+#include "smry.cu"
+
 #ifdef USE_OPTIMIZED_KERNELS
 #include "NeuronOptimize.cu"
 #endif
@@ -61,9 +64,7 @@ public:
      * Allocates memory for neurons and sets up semantic matching components.
      * Initializes all required subsystems including E5 model, feature extractors, and storage.
      */
-    NeuronModel() : processor(e5), logic_processor(e5), memory_processor(e5), sct_processor(e5), cache_processor(e5) {
-        NeuronModel(32);
-    }
+    NeuronModel() : NeuronModel(32) {}
 
     /**
      * @brief Constructor with custom grid size.
