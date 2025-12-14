@@ -35,7 +35,10 @@ jobs:
           wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | gpg --dearmor - | tee /usr/share/keyrings/kitware-archive-keyring.gpg >/dev/null
           echo "deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/kitware.list >/dev/null
           apt-get update
-          apt-get install -y cmake ninja-build git curl zip unzip tar pkg-config python3.11 python3.11-venv python3.11-dev
+          wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor - | tee /usr/share/keyrings/llvm-archive-keyring.gpg >/dev/null
+          echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] http://apt.llvm.org/jammy/ llvm-toolchain-jammy-16 main" | tee /etc/apt/sources.list.d/llvm.list >/dev/null
+          apt-get update
+          apt-get install -y cmake ninja-build git curl zip unzip tar pkg-config python3.11 python3.11-venv python3.11-dev clang-16 clang-tools-16
           update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
           apt-get clean
 
@@ -59,14 +62,10 @@ jobs:
                -DPython3_EXECUTABLE=/usr/bin/python3
           cp ./compile_commands.json ../compile_commands.json
 
-      - name: Install Clang-Tidy
-        run: |
-          env -u LD_LIBRARY_PATH pip install clang-tidy
-
       - name: Run Clang-Tidy
         run: |
           find src -name "*.cu" -o -name "*.cpp" | \
-            xargs clang-tidy -p . \
+            xargs clang-tidy-16 -p . \
             --checks='bugprone-*,performance-*' \
             --warnings-as-errors='' \
             > clang-tidy-report.txt || true
@@ -89,7 +88,6 @@ jobs:
   build-windows:
     name: Build on Windows
     runs-on: windows-latest
-    needs: code-quality
 
     steps:
       - name: Checkout Code
