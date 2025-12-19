@@ -17,17 +17,17 @@ if(MSVC)
 endif()
 
 if (MSVC)
-    add_compile_options(/Zm200)
+    add_compile_options(/Zm2000)
 endif()
 
 if (MSVC)
-    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler=\"/Zm200 /bigobj /utf-8\" -v -allow-unsupported-compiler")
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler=\"/Zm2000 /bigobj /utf-8\" -v -allow-unsupported-compiler")
 endif()
 
 set(CMAKE_VERBOSE_MAKEFILE ON)
 set_property(GLOBAL PROPERTY RULE_MESSAGES ON)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -O1 -Wall ")
+set(CMAKE_CXX_FLAGS "${CMAKE_C_FLAGS} -O3 -W3 ")
 
 project(src CXX CUDA)
 
@@ -132,6 +132,7 @@ add_library(src SHARED
         rag_knowledge_loader.h
         bpe_tokenizer.cpp
         converter.cpp
+        stb_img_impl.cpp
 )
 
 # =============================================================================

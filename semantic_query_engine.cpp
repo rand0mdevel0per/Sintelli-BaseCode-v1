@@ -4,6 +4,8 @@
 #include <limits>
 #include <cmath>
 
+#include "isw.cuh"
+
 // 全局语义查询引擎实例
 std::unique_ptr<SemanticQueryEngine> g_semantic_engine;
 
